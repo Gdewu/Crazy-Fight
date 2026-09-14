@@ -246,6 +246,9 @@ h1 { text-align:center; color:#e8e8e8; font-weight:400; letter-spacing:4px; font
 .btn-reset { background:#2c3e50 !important; color:#fff !important; }
 .btn-auto { background:#2980b9 !important; color:#fff !important; }
 .btn-auto.stop { background:#c0392b !important; }
+.btn-pause { background:#8e44ad !important; color:#fff !important; }
+.btn-pause.resume { background:#27ae60 !important; }
+.btn-pause:disabled { opacity:0.45; }
 /* 自动战斗倍速按钮 */
 .speed-group { display:flex; gap:4px; align-items:center; margin-left:6px; }
 .speed-group .speed-btn { padding:5px 12px; font-size:12px; background:#1a1a3a; color:#8899bb; border:1px solid #2a3a5e; border-radius:40px; }
@@ -587,6 +590,26 @@ h1 { text-align:center; color:#e8e8e8; font-weight:400; letter-spacing:4px; font
 .rogue-settle .rs-dmg { font-size:16px; color:#e8e8e8; margin-bottom:8px; }
 .rogue-settle .rs-dmg b { color:#5dade2; font-size:22px; }
 .rogue-settle .rs-sub { font-size:12px; color:#8899bb; }
+
+/* ---- v2.9 战斗伤害统计 ---- */
+.dmg-stats { margin:12px auto 4px; max-width:640px; text-align:left; }
+.dmg-stats-title { font-size:14px; font-weight:600; color:#e8eefc; margin-bottom:8px; text-align:center; }
+.dmg-stats-table { width:100%; border-collapse:collapse; font-size:12px; background:#0a101c; border:1px solid #2a3a55; border-radius:8px; overflow:hidden; }
+.dmg-stats-table th, .dmg-stats-table td { padding:7px 10px; text-align:right; border-bottom:1px solid #1c2a40; color:#eef3ff; }
+.dmg-stats-table th:first-child, .dmg-stats-table td:first-child { text-align:left; }
+.dmg-stats-table th { color:#b8c8e0; font-weight:600; background:#152238; }
+.dmg-stats-table tbody tr:nth-child(even) td { background:#0f1828; }
+.dmg-stats-table tbody tr:nth-child(odd) td { background:#0a101c; }
+.dmg-stats-table .dmg-total { color:#ffd56a; font-weight:700; }
+.dmg-stats-table .dmg-muted { color:#9aabbf; }
+.dmg-stats-table .dmg-team-sep td { text-align:left; color:#9fd0ff; background:#1a2d4a; font-weight:700; padding:6px 10px; }
+.dmg-stats-table .dmg-side-a { color:#7ec8ff; font-weight:600; }
+.dmg-stats-table .dmg-side-b { color:#ff9b9b; font-weight:600; }
+.dmg-stats-table .dmg-heal { color:#6fdc8c; font-weight:600; }
+.dmg-stats-table .dmg-ctrl { color:#f0c674; }
+.dmg-stats-table .dmg-ctrl-in { color:#c9a0dc; }
+#dmgStatsPanel { margin:6px auto 10px; max-width:720px; padding:0 8px; }
+.btn-pause { /* 暂停/继续 */ }
 
 /* 商店一次性物品卡片 */
 .rp-card.item-card { border-color:#2a4a3a; background:#0f1a16; }

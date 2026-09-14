@@ -18,6 +18,17 @@ const TALENT_TIERS = [
 ];
 
 const TALENT_DEFS = {
+    // ---- 通用(所有英雄可装; heroId = '*') ----
+    uni_hp: talentDef({
+        id: 'uni_hp', heroId: '*', tier: 'common', name: '生命强化', icon: '❤️',
+        desc: '最大生命值 +400',
+        effects: [{ type: 'maxHpFlat', value: 400 }]
+    }),
+    uni_speed: talentDef({
+        id: 'uni_speed', heroId: '*', tier: 'common', name: '攻速强化', icon: '⚡',
+        desc: '攻击速度 +15%',
+        effects: [{ type: 'speedPct', value: 0.15 }]
+    }),
     // ---- 魔剑士(v2.9 基准池) ----
     ms_might: talentDef({
         id: 'ms_might', heroId: 'magicSwordsman', tier: 'common', name: '威能', icon: '💥',
@@ -44,6 +55,44 @@ const TALENT_DEFS = {
         id: 'ms_origin', heroId: 'magicSwordsman', tier: 'legendary', name: '原初之力', icon: '🌌',
         desc: '开局直接进入星落期；结束后照常清空充能并重新积累',
         effects: [{ type: 'starfallOnStart' }]
+    }),
+    // ---- 进化兽 ----
+    evo_accel: talentDef({
+        id: 'evo_accel', heroId: 'evo', tier: 'common', name: '进化加速', icon: '⏩',
+        desc: '进化间隔从 5.5 秒缩短为 4 秒',
+        effects: [{ type: 'evoInterval', value: 4 }]
+    }),
+    evo_strong: talentDef({
+        id: 'evo_strong', heroId: 'evo', tier: 'common', name: '强力进化', icon: '💪',
+        desc: '每次进化在原有数值上额外 +5 攻击力、+1 双抗，且回复生命提升到 180 点',
+        effects: [{ type: 'evoStrong' }]
+    }),
+    evo_endless: talentDef({
+        id: 'evo_endless', heroId: 'evo', tier: 'rare', name: '无尽进化', icon: '♾️',
+        desc: '进化次数不再受限；第 4 次之后可继续进化，每次数值与前三次相同（+8 攻 / +0.1 攻速）',
+        effects: [{ type: 'evoEndless' }]
+    }),
+    evo_advanced: talentDef({
+        id: 'evo_advanced', heroId: 'evo', tier: 'legendary', name: '超前发育', icon: '🚀',
+        desc: '开局获得 500 点护盾；原第 4 次进化的额外强化提前到第 3 次生效',
+        effects: [{ type: 'evoAdvanced' }]
+    }),
+    // ---- 精灵 ----
+    fairy_boost: talentDef({
+        id: 'fairy_boost', heroId: 'fairy', tier: 'common', name: '小精灵强化', icon: '✨',
+        desc: '单只小精灵伤害从 10 提升到 20 点魔法伤害',
+        effects: [{ type: 'spiritDmg', value: 20 }]
+    }),
+    fairy_guard: talentDef({
+        id: 'fairy_guard', heroId: 'fairy', tier: 'rare', name: '精灵守护', icon: '🛡️',
+        desc: '每只存在的小精灵为己方所有单位提供 +1 双抗（动态随精灵数量变化）',
+        effects: [{ type: 'fairyGuard' }]
+    }),
+    // ---- 圣骑 ----
+    paladin_holy_blow: talentDef({
+        id: 'paladin_holy_blow', heroId: 'paladin', tier: 'common', name: '圣灵打击', icon: '💫',
+        desc: '释放圣光后，下一次普通攻击附带 150 点额外魔法伤害，并减少目标 5 点蓝量',
+        effects: [{ type: 'holyNextBlow', dmg: 150, manaBurn: 5 }]
     })
 };
 
@@ -65,8 +114,10 @@ const TALENT_LIST_BY_HERO = (function () {
 })();
 
 function talentsOfHero(heroId) {
-    const ids = TALENT_LIST_BY_HERO[heroId] || [];
-    return ids.map(id => TALENT_DEFS[id]).filter(Boolean);
+    const uni = (TALENT_LIST_BY_HERO['*'] || []).map(id => TALENT_DEFS[id]).filter(Boolean);
+    const own = (TALENT_LIST_BY_HERO[heroId] || []).map(id => TALENT_DEFS[id]).filter(Boolean);
+    // 通用在前,本命在后;已排除通用键本身
+    return uni.concat(own);
 }
 
 function talentTierOf(id) {
@@ -86,7 +137,8 @@ function normalizeTalentIds(talentIds, heroId) {
         const id = talentIds[i];
         if (!id || seen[id]) continue;
         const def = TALENT_DEFS[id];
-        if (!def || def.heroId !== heroId) continue;
+        if (!def) continue;
+        if (def.heroId !== heroId && def.heroId !== '*') continue;
         if (def.tier === 'legendary') {
             if (leg >= maxLeg) continue;
             leg++;

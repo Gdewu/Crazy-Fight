@@ -88,6 +88,7 @@ const MECHANICS = {
             unit.lastStandUsed = true;
             const hh = applyHealReduction(unit, CONFIG.lastStand.reviveHp);
             unit.hp = hh;
+            recordHeal(unit, unit, hh);
             addLog(world, `🏹 ${unit.name} 触发绝境求生！回复至${hh}HP`, 'highlight');
             return true;
         }
@@ -178,7 +179,7 @@ const MECHANICS = {
             ctx.dmg = round1(ctx.dmg + extra);
             const lost = Math.max(0, unit.maxHp - unit.hp);
             const heal = applyHealReduction(unit, Math.max(CONFIG.lifeStrike.minHeal, round1(lost * CONFIG.lifeStrike.healPct)));
-            unit.hp = Math.min(unit.maxHp, unit.hp + heal);
+            applyHealTo(unit, heal, unit);
             world.addLog(`🛡️ ${unit.name} 生命打击！+${dmgSpan(extra, 'magical')} 魔法伤害，回复 ${heal} HP`, 'heal');
         }
     },
@@ -236,8 +237,10 @@ const MECHANICS = {
     evolution: {
         onTick(unit, world, dt) {
             unit.evoTimer += dt;
-            while (unit.evoTimer >= CONFIG.evolution.interval && unit.evoStage < CONFIG.evolution.maxStages) {
-                unit.evoTimer -= CONFIG.evolution.interval;
+            const interval = (typeof evoIntervalOf === 'function') ? evoIntervalOf(unit) : CONFIG.evolution.interval;
+            const maxStages = (typeof evoMaxStages === 'function') ? evoMaxStages(unit) : CONFIG.evolution.maxStages;
+            while (unit.evoTimer >= interval && unit.evoStage < maxStages) {
+                unit.evoTimer -= interval;
                 applyEvo(unit, world);
             }
         },
@@ -245,12 +248,14 @@ const MECHANICS = {
             // 进化满(第4次)后每次普攻回血 25,受减疗
             if (unit.evoHeal > 0) {
                 const hh = applyHealReduction(unit, unit.evoHeal);
-                unit.hp = Math.min(unit.maxHp, unit.hp + hh);
+                applyHealTo(unit, hh, unit);
             }
         },
         statusText(unit) {
-            const prog = Math.min(100, (unit.evoTimer / CONFIG.evolution.interval) * 100);
-            const label = unit.evoStage >= CONFIG.evolution.maxStages ? '已满' : `${unit.evoStage}/${CONFIG.evolution.maxStages}`;
+            const interval = (typeof evoIntervalOf === 'function') ? evoIntervalOf(unit) : CONFIG.evolution.interval;
+            const maxStages = (typeof evoMaxStages === 'function') ? evoMaxStages(unit) : CONFIG.evolution.maxStages;
+            const prog = Math.min(100, (unit.evoTimer / interval) * 100);
+            const label = unit.evoStage >= maxStages ? '已满' : (maxStages === Infinity ? `${unit.evoStage}` : `${unit.evoStage}/${maxStages}`);
             return `<span class="status-badge evo"><span class="badge-icon">🐾</span>进化 ${label} (${Math.round(prog)}%)</span>`;
         }
     },
@@ -299,7 +304,7 @@ const MECHANICS = {
             if (!target) return;
             const dmg = Math.max(0.1, round1(cfg.dmg * (1 - getDefense(target, 'physical') / 100)));
             applyDamageTo(world, target, dmg, unit, { skill: true });
-            unit.stats.dmgDealt += dmg;
+            recordDealt(unit, dmg, 'physical');
             // 攻速 -20%(持续 3s): 只标记状态,实际倍率由 recalcSpeedMul 统一换算(与寒冰印记叠乘)
             target.netSlowTimer = cfg.durationSec;
             recalcSpeedMul(target);
@@ -342,7 +347,7 @@ const MECHANICS = {
                 if (t === enemy || !isAlive(t) || t.row !== unit.row) continue;
                 const d = Math.max(0.1, round1(base * (1 - getDefense(t, ctx.atkType) / 100)));
                 applyDamageTo(world, t, d, unit);
-                unit.stats.dmgDealt += d;
+                recordDealt(unit, d, ctx.atkType === 'magical' ? 'magical' : 'physical');
                 world.addLog(`⚔️ 剑气波及 ${t.name}：${dmgSpan(d, 'physical')} 物理伤害`, '');
                 if (t.hp <= 0) handleDeath(world, t, unit);
             }
@@ -356,7 +361,7 @@ const MECHANICS = {
             for (let i = 0; i < enemies.length; i++) {
                 const t = enemies[i];
                 if (!isAlive(t) || t.row !== unit.row) continue;
-                if (applyStunTo(world, t, CONFIG.swordAura.stunSec, { label: '剑气震荡' })) continue;
+                if (applyStunTo(world, t, CONFIG.swordAura.stunSec, { label: '剑气震荡', source: unit })) continue;
                 names.push(t.name);
             }
             if (names.length) {
@@ -385,7 +390,33 @@ const MECHANICS = {
             unit.mana = 0;
             applyManaRefund(world, unit);
             notifySkillCast(unit, world);
-            world.addLog(`⚜️ ${unit.name} 释放圣光！${CONFIG.paladin.durationSec} 秒内每秒回复 ${CONFIG.paladin.healPerSec} HP，双抗 +${CONFIG.paladin.resistBonus}`, 'highlight');
+            // v2.9 圣灵打击: 释放圣光瞬间武装下一次普攻
+            if (unit.holyNextBlowDmg > 0) {
+                unit.holyNextAtk = true;
+            }
+            world.addLog(`⚜️ ${unit.name} 释放圣光！${CONFIG.paladin.durationSec} 秒内每秒回复 ${CONFIG.paladin.healPerSec} HP，双抗 +${CONFIG.paladin.resistBonus}${unit.holyNextAtk ? '；圣灵打击已武装' : ''}`, 'highlight');
+        },
+        // v2.9 圣灵打击: 下一次普攻附带额外魔法伤害 + 扣蓝
+        onDamageCalc(unit, enemy, ctx, world) {
+            if (!unit.holyNextAtk || ctx.isSpear) return;
+            if (!enemy || enemy.hp <= 0) return;
+            unit.holyNextAtk = false;
+            const raw = unit.holyNextBlowDmg || 0;
+            if (raw > 0) {
+                const bolt = Math.max(0.1, round1(raw * (1 - getDefense(enemy, 'magical') / 100)));
+                ctx.addDmg += bolt;
+                if (ctx.h === 0) {
+                    world.addLog(`💫 ${unit.name} 圣灵打击！附加 ${dmgSpan(bolt, 'magical')} 魔法伤害`, 'highlight');
+                }
+            }
+            const burn = unit.holyNextBlowMana || 0;
+            if (burn > 0 && enemy.hasMana && enemy.mana > 0) {
+                const burned = Math.min(enemy.mana, burn);
+                enemy.mana = round1(Math.max(0, enemy.mana - burned));
+                if (ctx.h === 0) {
+                    world.addLog(`💫 ${unit.name} 圣灵打击灼尽 ${enemy.name} ${burned} 点蓝量（剩余 ${enemy.mana}）`, '');
+                }
+            }
         },
         onTick(unit, world, dt) {
             if (!unit.holyActive) return;
@@ -395,7 +426,7 @@ const MECHANICS = {
                 unit.holyAccum -= 1.0;
                 if (unit.hp <= 0) return;
                 const hh = applyHealReduction(unit, CONFIG.paladin.healPerSec);
-                unit.hp = Math.min(unit.maxHp, unit.hp + hh);
+                applyHealTo(unit, hh, unit);
                 world.addLog(`⚜️ ${unit.name} 圣光回复 ${hh} HP`, 'heal');
             }
             if (unit.holyTimer >= CONFIG.paladin.durationSec) {
@@ -536,7 +567,7 @@ const MECHANICS = {
                 unit.crystalTimer -= CONFIG.crystal.interval;
                 if (unit.hp <= 0) return;
                 const heal = applyHealReduction(unit, CONFIG.crystal.heal);
-                unit.hp = Math.min(unit.maxHp, unit.hp + heal);
+                applyHealTo(unit, heal, unit);
                 world.addLog(`💎 ${unit.name} 恢复水晶回复 ${heal} 生命值`, 'heal');
             }
         }
@@ -552,6 +583,7 @@ const MECHANICS = {
             const dmg = Math.max(0.1, round1(raw * (1 - getDefense(source, 'magical') / 100)));
             reflectGuard++;
             applyDamageTo(world, source, dmg, unit, { noLeech: true });   // 反弹伤害不结算全能吸血
+            recordDealt(unit, dmg, 'magical');
             reflectGuard--;
             world.addLog(`🌵 ${unit.name} 荆棘之甲反弹 ${dmgSpan(dmg, 'magical')} 魔法伤害`, '');
             if (source.hp <= 0) handleDeath(world, source, unit);
@@ -593,7 +625,11 @@ const MECHANICS = {
     // ---------- 精灵 · 灵光召唤(v4.5/v2.7): 开局0只,每5s+1(上限7),每只+5攻;每1s按对位攻击(单只10魔伤) ----------
     spiritSummon: {
         onTick(unit, world, dt) {
-            if (unit.hp <= 0) return;
+            // v2.9 精灵守护: 阵亡时回收已加的双抗
+            if (unit.hp <= 0) {
+                updateSpiritGuard(world, unit, 0);
+                return;
+            }
             // 召唤(开局已有1只,由 makeUnit 初始化)
             const cfg = CONFIG.fairySpirit;
             unit.spiritTimer += dt;
@@ -603,19 +639,21 @@ const MECHANICS = {
                 unit.atk = round1(unit.atk + cfg.atkPerSpirit);
                 world.addLog(`✨ ${unit.name} 召唤小精灵（${unit.spiritCount}/${cfg.maxCount}，攻击力+${cfg.atkPerSpirit}）`, 'highlight');
             }
+            updateSpiritGuard(world, unit);
             // 小精灵攻击: 每1s按对位规则各攻击一个敌人
             unit.spiritAtkTimer += dt;
             while (unit.spiritAtkTimer >= 1.0) {
                 unit.spiritAtkTimer -= 1.0;
                 if (unit.spiritCount <= 0) break;
+                const spiritDmg = (typeof unit.spiritDmgOverride === 'number') ? unit.spiritDmgOverride : cfg.spiritDmg;
                 let total = 0;
                 const hits = new Map();                     // 目标 → 命中次数(多只小精灵打同一目标时聚合显示)
                 for (let i = 0; i < unit.spiritCount; i++) {
                     const t = pickTarget(world, unit);          // 按当前对位选取
                     if (!t || !isAlive(t)) break;
-                    const dmg = Math.max(0.1, round1(cfg.spiritDmg * (1 - t.mr / 100)));
+                    const dmg = Math.max(0.1, round1(spiritDmg * (1 - t.mr / 100)));
                     applyDamageTo(world, t, dmg, unit);
-                    unit.stats.dmgDealt += dmg;
+                    recordDealt(unit, dmg, 'magical');
                     total += dmg;
                     hits.set(t.name, (hits.get(t.name) || 0) + 1);
                     if (t.hp <= 0) { handleDeath(world, t, unit); if (world.winner) return; }
@@ -651,7 +689,7 @@ const MECHANICS = {
             if (!unit.bossRallyDone && world.battleTime >= cfg.rallyTime) {
                 unit.bossRallyDone = true;
                 const heal = applyHealReduction(unit, cfg.rallyHeal);
-                unit.hp = Math.min(unit.maxHp, unit.hp + heal);
+                applyHealTo(unit, heal, unit);
                 unit.armor += cfg.rallyResist; unit.mr += cfg.rallyResist;
                 world.addLog(`🐻 ${unit.name} 坚毅怒吼！回复 ${heal} HP，双抗+${cfg.rallyResist}`, 'heal');
             }
@@ -669,8 +707,8 @@ const MECHANICS = {
                     // v2.7: 同一次技能事件 —— 伤害被黑暗护盾抵消时, 附带的眩晕由同一层护盾抵消(不再额外扣层)
                     const ev = newShieldEvent();
                     applyDamageTo(world, e, dmg, unit, { skill: true, event: ev });
-                    unit.stats.dmgDealt += dmg;
-                    applyStunTo(world, e, stunSec, { label: '裂地重击', event: ev });
+                    recordDealt(unit, dmg, 'physical');
+                    applyStunTo(world, e, stunSec, { label: '裂地重击', event: ev, source: unit });
                     if (e.hp <= 0) handleDeath(world, e, unit);
                 }
                 world.addLog(`🐻 ${unit.name} 裂地重击！全体敌人受到 ${dmgBase} 物理伤害并眩晕 ${stunSec}s`, 'highlight');
@@ -797,7 +835,7 @@ const MECHANICS = {
                 enemy.frostStacks = 0;
                 recalcSpeedMul(enemy);                  // 印记清空后仅保留其他仍在生效的减速(如猎网)
                 // v2.7: 冻结同样属于「攻击产生的控制」, 会被黑暗护盾挡下
-                if (!applyStunTo(world, enemy, cfg.freezeSec, { label: '寒冰印记冻结' })) {
+                if (!applyStunTo(world, enemy, cfg.freezeSec, { label: '寒冰印记冻结', source: unit })) {
                     world.addLog(`❄️ ${unit.name} 的寒冰印记爆发！${enemy.name} 被冻结 ${cfg.freezeSec}s`, 'silence');
                 }
             }
@@ -838,7 +876,7 @@ const MECHANICS = {
     // ============================================================
     // ---------- 魔剑士 · 魔法充能 / 星落(v2.5) ----------
     //   被动1: 每次攻击获得 10 点魔法充能
-    //   被动2: 充能满 100 → 进入「星落」10s: 攻击模式改为每 0.5s 对随机敌方单位造成 0.6×攻击力 魔法伤害
+    //   被动2: 充能满 100 → 进入「星落」10s: 攻击模式改为每 0.4s 对随机敌方单位造成 0.6×攻击力 魔法伤害
     //          (首次被星落命中的单位眩晕 1s); 星落期间不再普攻、不再积累充能; 结束后清空充能重新积累
     starfall: {
         // 被动1: 攻击命中获得充能(该钩子无 world 参数, 触发判定与日志放在 onTick)
@@ -853,7 +891,7 @@ const MECHANICS = {
             const cfg = CONFIG.starfall;
             const maxCharge = (typeof unit.starfallMaxCharge === 'number') ? unit.starfallMaxCharge : cfg.maxCharge;
             const adRatio = (typeof unit.starfallAdRatio === 'number') ? unit.starfallAdRatio : cfg.adRatio;
-            // ① 充能溢出 → 开启星落(立即轰击第 1 次, 之后每 0.5s 一次, 10s 内共 20 次)
+            // ① 充能溢出 → 开启星落(立即轰击第 1 次, 之后每 0.4s 一次, 10s 内共 25 次)
             if (unit.starfallTimer <= 0 && (unit.magicCharge || 0) >= maxCharge) {
                 unit.magicCharge = 0;
                 unit.starfallTimer = cfg.durationSec;
@@ -864,7 +902,7 @@ const MECHANICS = {
                 if (world.winner) return;
             }
             if (unit.starfallTimer <= 0) return;
-            // ② 星落轰击: 每 0.5s 一次, 随机选取存活敌人
+            // ② 星落轰击: 每 0.4s 一次, 随机选取存活敌人
             unit.starfallTimer = Math.max(0, unit.starfallTimer - dt);
             unit.starfallAccum = (unit.starfallAccum || 0) + dt;
             while (unit.starfallAccum >= cfg.interval && unit.starfallTimer > 0) {

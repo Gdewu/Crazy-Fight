@@ -23,8 +23,8 @@ const CONFIG = {
     // v2.5 猎人 · 猎网(取代「贯穿打击」): 满蓝释放, 对敌方攻击力最高的单位 150 物理伤害 + 攻速 -20% 持续 3s
     hunterNet: { dmg: 150, speedDownPct: 0.20, durationSec: 3 },
     // v2.5 魔剑士 · 魔法充能 / 星落: 每次攻击 +10 充能; 满 100 后攻击模式改为
-    //      每 0.5s 对随机敌人造成 0.6×攻击力 魔法伤害, 持续 10s(首次被命中的单位眩晕 1s), 结束后清空充能重新积累
-    starfall: { chargePerHit: 10, maxCharge: 100, interval: 0.5, durationSec: 10, adRatio: 0.6, stunSec: 1 },   // v2.7: 首次命中眩晕 0.5s → 1s
+    //      每 0.4s 对随机敌人造成 0.6×攻击力 魔法伤害, 持续 10s(首次被命中的单位眩晕 1s), 结束后清空充能重新积累
+    starfall: { chargePerHit: 10, maxCharge: 100, interval: 0.4, durationSec: 10, adRatio: 0.6, stunSec: 1 },   // v2.9: 攻击间隔 0.5 → 0.4
     // v2.5 长枪手 · 独守阵线(后排且前排无己方单位 → +20 攻击力 & 无视 10 点护甲)
     //            三连突刺(每 7s 蓄力 1s → 对敌方同列每个单位造成 3 连击)
     lancer: { rowAtkBonus: 20, armorPen: 10, cdInterval: 7, windupSec: 1, hits: 3 },

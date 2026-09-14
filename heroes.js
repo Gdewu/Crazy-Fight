@@ -40,7 +40,7 @@ const HERO_DEFS = {
         desc: '诅咒：每秒3%+20基础魔法伤害（吃SP），持续4秒，使目标重伤（一切回复减半），可叠加刷新；对BOSS单位：生命上限按 min(最大生命, 5000) 折算，单次3%伤害不超过150',
         skillName: '诅咒', mechanics: ['curse'] }),
     evo: heroDef({ id: 'evo', name: '进化兽', emoji: '🐾', maxHp: 1900, atk: 46, speed: 1.0, armor: 12, mr: 12,
-        desc: '进化：每5.5秒进化，最多4次；第4次额外+13双抗并获20%全能吸血', skillName: '进化', mechanics: ['evolution'] }),
+        desc: '进化：每5.5秒进化，最多4次；每次回复100生命；第4次额外+13双抗并获20%全能吸血', skillName: '进化', mechanics: ['evolution'] }),
     spearman: heroDef({ id: 'spearman', name: '长矛手', emoji: '🔱', maxHp: 1700, atk: 100, speed: 1.0, armor: 10, mr: 10,
         desc: '被动：前三发攻击造成真实伤害且攻击力+50', skillName: '真实打击', mechanics: ['trueStrike'] }),
     assassin: heroDef({ id: 'assassin', name: '刺客', emoji: '🗡️', maxHp: 1500, atk: 80, speed: 1.2, armor: 15, mr: 10,
@@ -66,7 +66,7 @@ const HERO_DEFS = {
         skillName: '自然滋养', mechanics: ['fairyHeal', 'spiritSummon'] }),
     // ---- v2.5 新增英雄 ----
     magicSwordsman: heroDef({ id: 'magicSwordsman', name: '魔剑士', emoji: '🌠', maxHp: 1650, atk: 65, speed: 1.2, armor: 15, mr: 18,
-        desc: '魔法充能：每次攻击获得10点魔法充能；充能满100点后进入「星落」：攻击模式改为每0.5秒对随机敌方单位造成 0.6×攻击力 的魔法伤害，持续10秒（首次被星落命中的单位眩晕1秒）；星落结束后失去全部充能，需重新攻击积累',
+        desc: '魔法充能：每次攻击获得10点魔法充能；充能满100点后进入「星落」：攻击模式改为每0.4秒对随机敌方单位造成 0.6×攻击力 的魔法伤害，持续10秒（首次被星落命中的单位眩晕1秒）；星落结束后失去全部充能，需重新攻击积累',
         skillName: '星落', mechanics: ['starfall'] }),
     lancer: heroDef({ id: 'lancer', name: '长枪手', emoji: '🪖', maxHp: 1800, atk: 80, speed: 0.8, armor: 20, mr: 15,
         cdName: '三连突刺', cooldownDuration: 7,

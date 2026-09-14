@@ -259,6 +259,9 @@ const mainContainer = $('mainContainer');
 // ---- 全局 DOM ----
 const logEl = $('log');
 const winnerBanner = $('winnerBanner');
+const dmgStatsPanel = $('dmgStatsPanel');   // v2.9: 战斗结束伤害统计面板
+const btnPause = $('btnPause');
+let isPaused = false;
 const roundInfo = $('roundInfo');
 const btnAuto = $('btnAuto');
 const teamElA = $('teamA'), teamElB = $('teamB');
@@ -989,7 +992,17 @@ function updateBars() {
     if (world.winner) {
         winnerBanner.style.display = 'block';
         winnerBanner.textContent = `🏆 ${world.winner}队 获得胜利！`;
-    } else winnerBanner.style.display = 'none';
+        if (dmgStatsPanel) {
+            dmgStatsPanel.style.display = 'block';
+            dmgStatsPanel.innerHTML = (typeof buildDamageStatsHtml === 'function') ? buildDamageStatsHtml(world) : '';
+        }
+    } else {
+        winnerBanner.style.display = 'none';
+        if (dmgStatsPanel) {
+            dmgStatsPanel.style.display = 'none';
+            dmgStatsPanel.innerHTML = '';
+        }
+    }
 }
 function updateCdArea(refs, unit) {
     if (!refs) return;
@@ -1131,12 +1144,36 @@ function renderFrame(throttled) {
 // ============================================================
 //  战斗控制(手动回合/自动战斗/倍速/重置)
 // ============================================================
+function setPauseUI(paused) {
+    if (!btnPause) return;
+    btnPause.textContent = paused ? '▶ 继续' : '⏸ 暂停';
+    btnPause.classList.toggle('resume', !!paused);
+    btnPause.disabled = !isAuto && !paused;
+}
 function stopAuto() {
     isAuto = false;
+    isPaused = false;
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     accSim = 0;
     btnAuto.textContent = '▶ 自动战斗';
     btnAuto.classList.remove('stop');
+    setPauseUI(false);
+}
+function togglePause() {
+    if (!isAuto && !isPaused) return;
+    if (isPaused) {
+        isPaused = false;
+        setPauseUI(false);
+        lastFrameTs = performance.now();
+        if (!rafId) rafId = requestAnimationFrame(autoFrame);
+        addLogUI('▶ 自动战斗继续');
+    } else {
+        isPaused = true;
+        setPauseUI(true);
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        accSim = 0;
+        addLogUI('⏸ 自动战斗已暂停');
+    }
 }
 function startAuto() {
     if (isAuto) return;
@@ -1146,12 +1183,14 @@ function startAuto() {
     const fresh = createWorld(roster.A, roster.B, { maxPerTeam: freshCap });
     if (aliveCount(fresh, 'A') === 0 || aliveCount(fresh, 'B') === 0) return;
     world = fresh;
-    applyTalentOnStart(world);   // v2.9 原初之力
+    applyTalentOnStart(world);   // v2.9 原初之力 / 超前发育
     logArrayRef = null; logShownCount = 0;
     world.uiDirty = true;
     isAuto = true;
+    isPaused = false;
     btnAuto.textContent = '⏹ 停止';
     btnAuto.classList.add('stop');
+    setPauseUI(false);
     addLog(world, '▶ 自动战斗开始', 'highlight');
     accSim = 0;
     lastFrameTs = performance.now();
@@ -1160,6 +1199,11 @@ function startAuto() {
 }
 function autoFrame(timestamp) {
     if (!isAuto) return;
+    if (isPaused) {
+        lastFrameTs = timestamp;
+        rafId = requestAnimationFrame(autoFrame);
+        return;
+    }
     const realDelta = Math.min((timestamp - lastFrameTs) / 1000, CONFIG.auto.deltaClamp);
     lastFrameTs = timestamp;
     // 倍速只改变模拟速率,不改变任何数值逻辑
@@ -1192,7 +1236,8 @@ function resetCombatState(w) {
     w.units.forEach(u => {
         u.attackCd = 0; u.skillCharge = 0; u.critStreak = 0; u.lastStandUsed = false;
         u.curse = null; u.curseTimer = 0; u.curseAppliedAt = false;
-        u.evoStage = 0; u.evoTimer = 0; u.manaAccum = 0; u.spearCount = 0;
+        u.evoStage = 0; u.evoTimer = 0; u.evoHeal = 0; u.manaAccum = 0; u.spearCount = 0;
+        u._evoStartShield = false;
         u.stunned = 0;
         u.speedMul = 1; u.frostStacks = 0; u._psionicArmed = true; u._psionicGain = 0;
         u.fighterTimer = 0; u.fighterActive = false; u.fighterCooldown = 0;
@@ -1202,6 +1247,7 @@ function resetCombatState(w) {
         u.lancerCasting = false; u.lancerCastTimer = 0;
         u.ghostImmuneTimer = 0; u.ghostReviveUsed = false;
         u.holyActive = false; u.holyTimer = 0; u.holyAccum = 0;
+        u.holyNextAtk = false; u._spiritGuardApplied = 0;
         u.ironStacks = 0; u.ironDmgAccum = 0; u.ironAtkCount = 0; u.ironUltUsed = false;
         u.ammo = CONFIG.revolver.capacity; u.reloading = false; u.reloadTimer = 0; u.lockedTarget = null;
         u.darkStacks = 0; u.darkShield = 0; u.darkShieldTimer = 0; u._darkStunPrev = 0;   // v2.6 黑暗游侠
@@ -1214,7 +1260,7 @@ function resetCombatState(w) {
         u.berserkTriggered = false; u.berserkActive = false;
         u.arcCasting = false; u.arcCastTimer = 0; u.arcHpLoss = 0;
         u.atkCount = 0;
-        u.stats = { dmgDealt: 0, crits: 0, attacks: 0 };
+        u.stats = emptyStats();
     });
     w.round = 0;
     w.winner = null;
@@ -1517,9 +1563,13 @@ function init() {
     // ---- 面板交互 ----
     $('btnFight').addEventListener('click', doManualRound);
     $('btnAuto').addEventListener('click', () => {
-        if (isAuto) { stopAuto(); addLogUI('⏸ 自动战斗暂停'); }
+        if (isAuto) { stopAuto(); addLogUI('⏹ 自动战斗已停止'); }
         else startAuto();
     });
+    if (btnPause) {
+        btnPause.addEventListener('click', togglePause);
+        setPauseUI(false);
+    }
     $('btnReset').addEventListener('click', () => {
         // 与原版 fullReset 一致: 按当前编队重建双方单位(清掉进化/绝境求生等战斗态)并重置战斗
         rebuildAll();

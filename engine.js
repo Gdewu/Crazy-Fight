@@ -39,7 +39,7 @@ let reflectGuard = 0;
 // ② 机制注册表 MECHANICS —— 已外移至 mechanics.js
 
 
-// ---- v2.5 辅助: 星落单次轰击(随机命中 1 个存活敌人, 0.6×攻击力 魔法伤害; 该目标首次被命中额外眩晕 0.5s) ----
+// ---- v2.5 辅助: 星落单次轰击(随机命中 1 个存活敌人, 0.6×攻击力 魔法伤害; 该目标首次被命中额外眩晕) ----
 function starfallPulse(unit, world, cfg) {
     const enemies = world[enemyTeamKey(unit.teamKey)];
     const alive = [];
@@ -61,11 +61,11 @@ function starfallPulse(unit, world, cfg) {
     // v2.7: 同一次技能的事件标记 —— 若伤害被黑暗护盾抵消, 附带的眩晕也由同一层护盾抵消
     const ev = newShieldEvent();
     applyDamageTo(world, t, dmg, unit, { skill: true, event: ev });
-    unit.stats.dmgDealt += dmg;
+    recordDealt(unit, dmg, 'magical');
     let msg = `🌠 星落命中 ${t.name}：${dmgSpan(dmg, 'magical')}${crit ? ' 暴击' : ''} 魔法伤害`;
     if (!t.starfallHitFlag) {
         t.starfallHitFlag = true;
-        if (!applyStunTo(world, t, cfg.stunSec, { label: '星落眩晕', event: ev })) {
+        if (!applyStunTo(world, t, cfg.stunSec, { label: '星落眩晕', event: ev, source: unit })) {
             msg += `，首次命中额外眩晕 ${cfg.stunSec}s`;
         }
     }
@@ -121,7 +121,7 @@ function castMageBurst(world, unit) {
     applyDamageTo(world, defender, dmg, unit, { skill: true, event: ev });
     world.round++;
     world.addLog(`🔮 ${unit.name} 释放法术爆发！造成 ${dmgSpan(dmg, 'magical')} 魔法伤害`, 'highlight');
-    unit.stats.dmgDealt += dmg;
+    recordDealt(unit, dmg, 'magical');
     if (defender.hp <= 0) handleDeath(world, defender, unit);
 }
 // ---- v2.5 长枪手 · 三连突刺: 对敌方「同列」所有存活单位各造成 3 连击(物理伤害, 各自结算护甲) ----
@@ -149,7 +149,7 @@ function castLancerTripleStrike(world, unit) {
             const def = Math.max(0, getDefense(t, 'physical') - pen);
             const dmg = Math.max(0.1, round1(unit.atk * (1 - def / 100)));
             applyDamageTo(world, t, dmg, unit, { skill: true });
-            unit.stats.dmgDealt += dmg;
+            recordDealt(unit, dmg, 'physical');
             world.round++;
             sum += dmg;
             times++;
@@ -186,7 +186,7 @@ function performGhostAttack(world, unit) {
         if (!isAlive(t)) continue;
         const dmg = Math.max(0.1, round1(unit.atk * (1 - getDefense(t, 'magical') / 100)));
         applyDamageTo(world, t, dmg, unit);
-        unit.stats.dmgDealt += dmg;
+        recordDealt(unit, dmg, 'magical');
         total += dmg;
         names.push(t.name);
         if (t.hp <= 0) {
@@ -224,6 +224,89 @@ function round1(v) { return Math.round(v * 10) / 10; }
 function round2(v) { return Math.round(v * 100) / 100; }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function getDefense(unit, atkType) { return (atkType === 'physical') ? unit.armor : unit.mr; }
+// ---- v2.9 伤害统计: 造成伤害按物理/魔法/真实分列 + 承受伤害(实际扣血+护盾吸收) ----
+function emptyStats() {
+    return {
+        dmgDealt: 0, crits: 0, attacks: 0,
+        dmgByType: { physical: 0, magical: 0, true: 0 },
+        dmgTaken: 0, shieldAbsorbed: 0, hpLost: 0,
+        healDone: 0, healTaken: 0,
+        stunCount: 0, stunSec: 0,
+        stunnedCount: 0, stunnedSec: 0
+    };
+}
+function ensureStats(unit) {
+    if (!unit) return null;
+    if (!unit.stats) unit.stats = emptyStats();
+    if (!unit.stats.dmgByType) unit.stats.dmgByType = { physical: 0, magical: 0, true: 0 };
+    if (typeof unit.stats.dmgTaken !== 'number') unit.stats.dmgTaken = 0;
+    if (typeof unit.stats.shieldAbsorbed !== 'number') unit.stats.shieldAbsorbed = 0;
+    if (typeof unit.stats.hpLost !== 'number') unit.stats.hpLost = 0;
+    if (typeof unit.stats.healDone !== 'number') unit.stats.healDone = 0;
+    if (typeof unit.stats.healTaken !== 'number') unit.stats.healTaken = 0;
+    if (typeof unit.stats.stunCount !== 'number') unit.stats.stunCount = 0;
+    if (typeof unit.stats.stunSec !== 'number') unit.stats.stunSec = 0;
+    if (typeof unit.stats.stunnedCount !== 'number') unit.stats.stunnedCount = 0;
+    if (typeof unit.stats.stunnedSec !== 'number') unit.stats.stunnedSec = 0;
+    return unit.stats;
+}
+function recordDealt(source, dmg, kind) {
+    if (!source || !dmg || dmg <= 0) return;
+    const s = ensureStats(source);
+    if (!s) return;
+    const k = (kind === 'true' || kind === 'magical') ? kind : 'physical';
+    s.dmgDealt = round1(s.dmgDealt + dmg);
+    s.dmgByType[k] = round1((s.dmgByType[k] || 0) + dmg);
+}
+function recordTaken(target, absorbed, hpLoss) {
+    if (!target) return;
+    const s = ensureStats(target);
+    if (!s) return;
+    const a = absorbed > 0 ? absorbed : 0;
+    const h = hpLoss > 0 ? hpLoss : 0;
+    s.shieldAbsorbed = round1(s.shieldAbsorbed + a);
+    s.hpLost = round1(s.hpLost + h);
+    s.dmgTaken = round1(s.dmgTaken + a + h);
+}
+// 治疗记账: source 的治疗量 + target 的受疗(自回不计入受疗)
+function recordHeal(source, target, amount) {
+    if (!amount || amount <= 0) return;
+    if (source) {
+        const s = ensureStats(source);
+        if (s) s.healDone = round1(s.healDone + amount);
+    }
+    if (target && source !== target) {
+        const t = ensureStats(target);
+        if (t) t.healTaken = round1(t.healTaken + amount);
+    }
+}
+// 治疗施加(amount 须已是减疗后数值;自动算实际入血并记账)
+function applyHealTo(target, amount, source) {
+    if (!target || !amount || amount <= 0 || target.hp <= 0) return 0;
+    const before = target.hp;
+    target.hp = Math.min(target.maxHp, target.hp + amount);
+    const actual = round1(Math.max(0, target.hp - before));
+    if (actual > 0) recordHeal(source || target, target, actual);
+    return actual;
+}
+// 控制记账(成功施加时)
+function recordStun(source, target, sec) {
+    if (!sec || sec <= 0) return;
+    if (source && source !== target) {
+        const s = ensureStats(source);
+        if (s) {
+            s.stunCount = (s.stunCount || 0) + 1;
+            s.stunSec = round1((s.stunSec || 0) + sec);
+        }
+    }
+    if (target) {
+        const t = ensureStats(target);
+        if (t) {
+            t.stunnedCount = (t.stunnedCount || 0) + 1;
+            t.stunnedSec = round1((t.stunnedSec || 0) + sec);
+        }
+    }
+}
 // ---- 攻速倍率统一计算: 各类减速叠乘,互不覆盖 ----
 //  历史问题: 猎网(-20%)与寒冰印记(-10%)各自直接写 speedMul,后写入者会抹掉先前的减速;
 //  冻结时直接写 speedMul = 1 更会把仍在生效的猎网一并解除。故此所有减速只允许记状态,由本函数换算。
@@ -527,26 +610,56 @@ function applyTalents(unit, talentIds) {
     unit.starfallMaxCharge = null;
     unit.starfallCanCrit = false;
     unit.starfallOnStart = false;
+    unit.evoInterval = null;
+    unit.evoStrong = false;
+    unit.evoEndless = false;
+    unit.evoAdvanced = false;
+    unit.spiritDmgOverride = null;
+    unit.fairyGuard = false;
+    unit.holyNextBlowDmg = 0;
+    unit.holyNextBlowMana = 0;
+    unit.holyNextAtk = false;
     if (!unit.talentIds.length) return;
-    let speedFlat = 0, critRate = 0;
+    let speedFlat = 0, critRate = 0, speedPct = 0, maxHpFlat = 0;
     unit.talentIds.forEach(id => {
         const def = TALENT_DEFS[id];
         if (!def || !def.effects) return;
         def.effects.forEach(ef => {
             if (!ef) return;
             if (ef.type === 'speedFlat') speedFlat += (ef.value || 0);
+            else if (ef.type === 'speedPct') speedPct += (ef.value || 0);
+            else if (ef.type === 'maxHpFlat') maxHpFlat += (ef.value || 0);
             else if (ef.type === 'critRate') critRate += (ef.value || 0);
             else if (ef.type === 'starfallAdRatio') unit.starfallAdRatio = ef.value;
             else if (ef.type === 'starfallMaxCharge') unit.starfallMaxCharge = ef.value;
             else if (ef.type === 'starfallCanCrit') unit.starfallCanCrit = true;
             else if (ef.type === 'starfallOnStart') unit.starfallOnStart = true;
+            else if (ef.type === 'evoInterval') unit.evoInterval = ef.value;
+            else if (ef.type === 'evoStrong') unit.evoStrong = true;
+            else if (ef.type === 'evoEndless') unit.evoEndless = true;
+            else if (ef.type === 'evoAdvanced') unit.evoAdvanced = true;
+            else if (ef.type === 'spiritDmg') unit.spiritDmgOverride = ef.value;
+            else if (ef.type === 'fairyGuard') unit.fairyGuard = true;
+            else if (ef.type === 'holyNextBlow') {
+                unit.holyNextBlowDmg = ef.dmg || 0;
+                unit.holyNextBlowMana = ef.manaBurn || 0;
+            }
         });
     });
+    if (maxHpFlat > 0) {
+        unit.maxHp = round1(unit.maxHp + maxHpFlat);
+    }
     if (speedFlat && unit.heroId !== 'gunner') {
         unit.speed = round2(unit.speed + speedFlat);
     } else if (speedFlat && unit.heroId === 'gunner') {
         // 枪手锁攻速: 与装备一致,按 0.05 → +1 攻击力折算
         unit.atk = round1(unit.atk + Math.round(speedFlat / 0.05));
+    }
+    if (speedPct && unit.heroId !== 'gunner') {
+        unit.speed = round2(unit.speed * (1 + speedPct));
+    } else if (speedPct && unit.heroId === 'gunner') {
+        const gain = round2(unit.speed * speedPct);
+        unit.atk = round1(unit.atk + Math.round(gain / 0.05));
     }
     if (critRate) unit.critRate = round1((unit.critRate || 0) + critRate);
 }
@@ -594,6 +707,12 @@ function makeUnit(heroId, equipIds, teamKey, cell, world, freeEquip, talentIds) 
     unit.evoStage = 0;
     unit.evoTimer = 0;
     unit.evoHeal = 0;
+    // v2.9 进化兽天赋兜底(由 applyTalents 写入)
+    if (unit.evoInterval === undefined) unit.evoInterval = null;
+    if (unit.evoStrong === undefined) unit.evoStrong = false;
+    if (unit.evoEndless === undefined) unit.evoEndless = false;
+    if (unit.evoAdvanced === undefined) unit.evoAdvanced = false;
+    unit._evoStartShield = false;
     unit.manaAccum = 0;
     unit.spearCount = 0;
     unit.stunned = 0;            // 眩晕(禁普攻/施法;回蓝/CD/已释放技能不受影响)
@@ -621,6 +740,8 @@ function makeUnit(heroId, equipIds, teamKey, cell, world, freeEquip, talentIds) 
     unit.holyActive = false;     // 圣骑 · 圣光状态
     unit.holyTimer = 0;
     unit.holyAccum = 0;
+    unit.holyNextAtk = false;    // v2.9 圣灵打击
+    unit._spiritGuardApplied = 0; // v2.9 精灵守护已应用的双抗层数
     unit.ironStacks = 0;         // 战士 · 铁血意志(印记层数 / 承伤累计 / 攻击计数 / 大招是否已用)
     unit.ironDmgAccum = 0;
     unit.ironAtkCount = 0;
@@ -657,8 +778,8 @@ function makeUnit(heroId, equipIds, teamKey, cell, world, freeEquip, talentIds) 
     unit.fighterTimer = 0;
     unit.fighterActive = false;
     unit.fighterCooldown = 0;
-    // 统计(批量模拟用: 累计造成伤害/暴击次数/普攻次数)
-    unit.stats = { dmgDealt: 0, crits: 0, attacks: 0 };
+    // 统计(批量模拟用: 累计造成伤害/暴击次数/普攻次数; v2.9 分类型输出+承受)
+    unit.stats = emptyStats();
     return unit;
 }
 
@@ -746,11 +867,17 @@ function createWorld(teamA, eqA, teamB, eqB, opts) {
     world.addLog = (msg, cls) => { addLog(world, msg, cls); };
     return world;
 }
-// v2.9 原初之力: 开局直接进入星落期(须在世界就绪、且不会被 resetCombatState 清掉之后调用)
+// v2.9 原初之力 / 超前发育: 开局效果(须在世界就绪、且不会被 resetCombatState 清掉之后调用)
 function applyTalentOnStart(world) {
     if (!world || !world.units) return;
     world.units.forEach(u => {
         if (world.winner) return;
+        // 超前发育: 开局 500 护盾(与守护斗篷等护盾叠层;重置后重新获得;防重复调用叠盾)
+        if (u.evoAdvanced && u.hp > 0 && !u._evoStartShield) {
+            u._evoStartShield = true;
+            u.shield = round1((u.shield || 0) + 500);
+            world.addLog(`🚀 ${u.name} 的「超前发育」生效，开局获得 500 点护盾！`, 'highlight');
+        }
         if (!u.starfallOnStart || u.hp <= 0 || !hasMech(u, 'starfall')) return;
         if (u.starfallTimer > 0) return;
         const cfg = CONFIG.starfall;
@@ -790,8 +917,9 @@ function applyDamageTo(world, target, dmg, source, opts) {
     }
     const hpBefore = target.hp;
     let remainingDmg = dmg;
+    let absorbed = 0;
     if (target.shield > 0) {
-        const absorbed = Math.min(target.shield, remainingDmg);
+        absorbed = Math.min(target.shield, remainingDmg);
         target.shield -= absorbed;
         remainingDmg -= absorbed;
         if (absorbed > 0) {
@@ -803,6 +931,7 @@ function applyDamageTo(world, target, dmg, source, opts) {
     }
     // hpLoss = 实际扣血量(护盾吸收部分不计) —— 战士「铁血意志」按此累计
     const hpLoss = round1(Math.max(0, hpBefore - target.hp));
+    recordTaken(target, absorbed, hpLoss);
     fireMechs(target, 'onDamaged', source, { dmg, hpLoss }, world);
     // 全能吸血: 按「实际扣血量」回复(覆盖普攻/技能/DoT/装备附加等一切来源),受自身重伤减半
     //  修正1: 基数由原始 dmg 改为 hpLoss —— 被护盾吸收的部分不再产生吸血
@@ -810,8 +939,8 @@ function applyDamageTo(world, target, dmg, source, opts) {
     if (source && source !== target && source.hp > 0 && source.leechAll > 0 && hpLoss > 0 && !(opts && opts.noLeech)) {
         const leech = applyHealReduction(source, round1(hpLoss * source.leechAll / 100));
         if (leech > 0) {
-            source.hp = Math.min(source.maxHp, source.hp + leech);
-            addLog(world, `🧥 ${source.name} 全能吸血回复 ${leech} HP`, 'heal');
+            const actual = applyHealTo(source, leech, source);
+            if (actual > 0) addLog(world, `🧥 ${source.name} 全能吸血回复 ${actual} HP`, 'heal');
         }
     }
     return true;
@@ -842,6 +971,7 @@ function applyStunTo(world, target, sec, opts) {
         }
     }
     target.stunned = Math.max(target.stunned || 0, sec);
+    recordStun(opts && opts.source, target, sec);
     return false;
 }
 
@@ -914,7 +1044,7 @@ function applyCurseTick(world, unit) {
         return;
     }
     addLog(world, `🧙 ${curse.casterName} 的诅咒灼烧！${unit.name} 受到 ${dmgSpan(tickDmg, 'magical')} 魔法伤害`, 'curse');
-    if (caster) caster.stats.dmgDealt += tickDmg;
+    if (caster) recordDealt(caster, tickDmg, 'magical');
     if (unit.hp <= 0) {
         unit.curse = null;
         unit.curseAppliedAt = false;
@@ -929,15 +1059,60 @@ function applyCurseTick(world, unit) {
     }
 }
 
-// ---- 进化结算(由 evolution 机制调用) ----
+// ---- v2.9 精灵守护: 每只小精灵为己方全员 +1 双抗(动态跟随 spiritCount / 阵亡回收) ----
+function updateSpiritGuard(world, unit, forceCount) {
+    if (!unit || !unit.fairyGuard || !world) return;
+    const now = (typeof forceCount === 'number') ? forceCount : (unit.spiritCount || 0);
+    const prev = unit._spiritGuardApplied || 0;
+    if (prev === now) return;
+    const delta = now - prev;
+    const allies = world[unit.teamKey] || [];
+    for (let i = 0; i < allies.length; i++) {
+        const a = allies[i];
+        if (!a) continue;
+        a.armor = Math.max(0, (a.armor || 0) + delta);
+        a.mr = Math.max(0, (a.mr || 0) + delta);
+    }
+    unit._spiritGuardApplied = now;
+    world.uiDirty = true;
+    if (delta > 0) {
+        addLog(world, `🛡️ ${unit.name} 的精灵守护：己方全员双抗 +${delta}（当前精灵 ${now}）`, 'highlight');
+    } else if (delta < 0) {
+        addLog(world, `🛡️ ${unit.name} 的精灵守护消退：己方全员双抗 ${delta}（当前精灵 ${now}）`, '');
+    }
+}
+// ---- 进化结算(由 evolution 机制调用;支持 v2.9 进化兽天赋) ----
+function evoMaxStages(unit) {
+    return unit && unit.evoEndless ? Infinity : CONFIG.evolution.maxStages;
+}
+function evoIntervalOf(unit) {
+    if (unit && typeof unit.evoInterval === 'number') return unit.evoInterval;
+    return CONFIG.evolution.interval;
+}
+function evoHealBase(unit) {
+    return (unit && unit.evoStrong) ? 180 : CONFIG.evolution.healPerEvolve;
+}
+// 第 ec 次(1-based)进化的阶段表项: 超前发育把原第4次强化提前到第3次;无尽进化第5次起循环前3次
+function evoStageAt(unit, ec) {
+    const base = CONFIG.evolution.stages;
+    if (unit && unit.evoAdvanced) {
+        const map = [0, 1, 3, 2]; // s1, s2, 原s4, 原s3
+        if (ec <= 4) return base[map[ec - 1]] || null;
+    }
+    if (unit && unit.evoEndless && ec > CONFIG.evolution.maxStages) {
+        return base[(ec - CONFIG.evolution.maxStages - 1) % 3] || null;
+    }
+    return base[ec - 1] || null;
+}
 function applyEvo(unit, world) {
     const ek = unit.evoStage;
-    if (ek >= CONFIG.evolution.maxStages) return;
+    if (ek >= evoMaxStages(unit)) return;
     unit.evoStage = ek + 1;
     const ec = unit.evoStage;
-    let heal = applyHealReduction(unit, CONFIG.evolution.healPerEvolve);
-    unit.hp = Math.min(unit.maxHp, unit.hp + heal);
-    const st = CONFIG.evolution.stages[ec - 1];
+    const healBase = evoHealBase(unit);
+    let heal = applyHealReduction(unit, healBase);
+    applyHealTo(unit, heal, unit);
+    const st = evoStageAt(unit, ec);
     let logMsg = `🐾 ${unit.name} 第${ec}次进化！`;
     if (st) {
         if (st.atk) unit.atk += st.atk;
@@ -953,6 +1128,12 @@ function applyEvo(unit, world) {
         if (st.healPerHit) parts.push(`普攻回血${st.healPerHit}`);
         if (st.omniLeech) parts.push(`全能吸血+${st.omniLeech}%`);
         if (parts.length) logMsg += parts.join('，');
+    }
+    if (unit.evoStrong) {
+        unit.atk = round1(unit.atk + 5);
+        unit.armor += 1;
+        unit.mr += 1;
+        logMsg += `，强力进化攻击+5双抗+1`;
     }
     logMsg += isHealReduced(unit) ? `，回复${heal}HP（受重伤影响）` : `，回复${heal}HP`;
     addLog(world, logMsg, 'highlight');
@@ -983,14 +1164,14 @@ function castIronBreak(world, unit) {
         const raw = unit.atk * cfg.ultAtkRatio + lost * cfg.ultLostHpRatio;
         const dmg = Math.max(0.1, round1(raw * (1 - t.armor / 100)));   // 物理伤害: 受护甲减免
         applyDamageTo(world, t, dmg, unit, { skill: true });
-        unit.stats.dmgDealt += dmg;
+        recordDealt(unit, dmg, 'physical');
         total += dmg; hit++;
         world.addLog(`💥 铁血破阵命中 ${t.name}：${dmgSpan(dmg, 'physical')} 物理伤害`, 'highlight');
         if (t.hp <= 0) handleDeath(world, t, unit);
     }
     notifySkillCast(unit, world);
     const heal = applyHealReduction(unit, round1(total * cfg.ultHealRatio));
-    unit.hp = Math.min(unit.maxHp, unit.hp + heal);
+    applyHealTo(unit, heal, unit);
     world.addLog(`🗡️ ${unit.name} 铁血破阵！命中 ${hit} 名前排共 ${round1(total)} 物理伤害，回复 ${heal} HP（印记保留）`, 'highlight');
 }
 
@@ -1008,7 +1189,7 @@ function castArcStorm(world, unit) {
         const raw = isMain ? cfg.mainDmg : cfg.sideDmg;
         const dmg = Math.max(0.1, round1(raw * (1 - t.mr / 100)));
         applyDamageTo(world, t, dmg, unit, { skill: true });
-        unit.stats.dmgDealt += dmg;
+        recordDealt(unit, dmg, 'magical');
         if (isMain) {
             t.mr = Math.max(0, t.mr - cfg.mrShred);        // 主目标魔抗永久降低
             world.addLog(`🧿 秘法风暴贯穿 ${t.name}（主目标）：${dmgSpan(dmg, 'magical')} 魔法伤害（${cfg.mainDmg} 基础），魔抗永久 -${cfg.mrShred}`, 'highlight');
@@ -1036,8 +1217,8 @@ function performFairyHeal(world, unit) {
     }
     if (!target) return false;                              // 全员满血 → 空过一拍
     const heal = applyHealReduction(target, round1(unit.atk));
-    target.hp = Math.min(target.maxHp, target.hp + heal);
-    addLog(world, `🌿 ${unit.name} 治愈 ${target.name}，回复 ${heal} HP`, 'heal');
+    const actual = applyHealTo(target, heal, unit);
+    addLog(world, `🌿 ${unit.name} 治愈 ${target.name}，回复 ${actual} HP`, 'heal');
     unit.atkCount = (unit.atkCount || 0) + 1;
     unit.stats.attacks++;
     return true;
@@ -1134,15 +1315,15 @@ function performAttack(world, attacker, defender) {
         world.round++;
         attacker.atkCount = (attacker.atkCount || 0) + 1;
         attacker.stats.attacks++;
-        attacker.stats.dmgDealt += ctx.dmg;
+        recordDealt(attacker, ctx.dmg, ctx.kind);
         ctx.totalDmg += ctx.dmg;
 
         fireMechs(attacker, 'onHitDealt', defender, ctx);
         if (ctx.lifesteal > 0) {
             let lifesteal = round1(ctx.lifesteal);
             lifesteal = applyHealReduction(attacker, lifesteal);
-            attacker.hp = Math.min(attacker.maxHp, attacker.hp + lifesteal);
-            ctx.totalLifesteal += lifesteal;
+            const lsActual = applyHealTo(attacker, lifesteal, attacker);
+            ctx.totalLifesteal += lsActual;
         }
 
         let hitMsg = `${h + 1}/${ctx.hitCount}`;
@@ -1355,15 +1536,62 @@ function mulberry32(a) {
 // ---- 队伍维度统计(批量模拟用) ----
 function teamStats(world, teamKey) {
     const team = world[teamKey];
-    let survivors = 0, dmg = 0, crits = 0, attacks = 0;
+    let survivors = 0, dmg = 0, crits = 0, attacks = 0, taken = 0, heal = 0, stunned = 0;
     for (let i = 0; i < team.length; i++) {
         const u = team[i];
         if (u.hp > 0) survivors++;
         dmg += u.stats.dmgDealt;
         crits += u.stats.crits;
         attacks += u.stats.attacks;
+        taken += (u.stats.dmgTaken || 0);
+        heal += (u.stats.healDone || 0);
+        stunned += (u.stats.stunnedSec || 0);
     }
-    return { survivors, dmg: round1(dmg), crits, attacks, hp: round1(team.reduce((s, u) => s + u.hp, 0)) };
+    return {
+        survivors, dmg: round1(dmg), taken: round1(taken), heal: round1(heal),
+        stunned: round1(stunned), crits, attacks,
+        hp: round1(team.reduce((s, u) => s + u.hp, 0))
+    };
+}
+// ---- v2.9 战斗结束伤害统计表(纯 HTML,无 DOM;远征结算 / 3v3 共用) ----
+function unitDamageRow(u) {
+    const s = ensureStats(u) || emptyStats();
+    const by = s.dmgByType || { physical: 0, magical: 0, true: 0 };
+    const sideCls = u.teamKey === 'A' ? 'dmg-side-a' : 'dmg-side-b';
+    const ctrl = `${s.stunCount || 0}次/${round1(s.stunSec || 0)}s`;
+    const ctrlIn = `${s.stunnedCount || 0}次/${round1(s.stunnedSec || 0)}s`;
+    return `<tr>
+        <td class="${sideCls}">${u.emoji || ''}${u.name}</td>
+        <td>${round1(by.physical || 0)}</td>
+        <td>${round1(by.magical || 0)}</td>
+        <td>${round1(by.true || 0)}</td>
+        <td class="dmg-total">${round1(s.dmgDealt || 0)}</td>
+        <td>${round1(s.dmgTaken || 0)}</td>
+        <td class="dmg-muted">${round1(s.shieldAbsorbed || 0)}</td>
+        <td class="dmg-heal">${round1(s.healDone || 0)}</td>
+        <td class="dmg-heal">${round1(s.healTaken || 0)}</td>
+        <td class="dmg-ctrl">${ctrl}</td>
+        <td class="dmg-ctrl-in">${ctrlIn}</td>
+    </tr>`;
+}
+function buildDamageStatsHtml(world) {
+    if (!world || !world.A || !world.B) return '';
+    const head = `<tr><th>单位</th><th>物理</th><th>魔法</th><th>真实</th><th>总输出</th><th>承受</th><th>护盾</th><th>治疗</th><th>受疗</th><th>控制</th><th>被控</th></tr>`;
+    const rowsA = world.A.map(unitDamageRow).join('');
+    const rowsB = world.B.map(unitDamageRow).join('');
+    const sa = teamStats(world, 'A'), sb = teamStats(world, 'B');
+    return `<div class="dmg-stats">
+        <div class="dmg-stats-title">📊 战斗统计</div>
+        <table class="dmg-stats-table">
+            <thead>${head}</thead>
+            <tbody>
+                <tr class="dmg-team-sep"><td colspan="11">A 队 · 输出 ${sa.dmg} · 承受 ${sa.taken} · 治疗 ${sa.heal}</td></tr>
+                ${rowsA}
+                <tr class="dmg-team-sep"><td colspan="11">B 队 · 输出 ${sb.dmg} · 承受 ${sb.taken} · 治疗 ${sb.heal}</td></tr>
+                ${rowsB}
+            </tbody>
+        </table>
+    </div>`;
 }
 
 // ---- 单局碰撞模拟(批量模拟复用;无 DOM) ----
@@ -1400,9 +1628,12 @@ const Engine = {
     EQUIP_UPGRADES, EQUIP_UPGRADED_LIST, EQUIP_UPGRADE_COST, equipUpgradeTarget,
     createWorld, tick, performAttack, simulateBattle, mulberry32, normalizeEquipIds, applyHealReduction,
     addLog, applyDamageTo, handleDeath, makeUnit, equipCost, equipPointsUsed, equipTierOf, equipListOfTier,
-    dmgSpan, hitKind,
+    dmgSpan, hitKind, applyStunTo,
     pickTarget, checkTeamWipe, enemyTeamKey, aliveCount, teamStats,
-    applyTalents, applyTalentOnStart, normalizeTalentIds
+    applyTalents, applyTalentOnStart, normalizeTalentIds,
+    evoMaxStages, evoIntervalOf, evoHealBase, evoStageAt, applyEvo,
+    emptyStats, ensureStats, recordDealt, recordTaken, buildDamageStatsHtml,
+    updateSpiritGuard, recordHeal, applyHealTo, recordStun
 };
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -1419,7 +1650,10 @@ if (typeof module !== 'undefined' && module.exports) {
         enemyTeamKey, isAlive, pickTarget, pickStrongestEnemy, spOf, handleDeath, makeUnit, recalcSpeedMul,
         addIronStack, applyCurseTick, applyEvo, applyManaRefund, castArcStorm, castLancerTripleStrike,
         castMageBurst, lancerAlone, updateLancerAlone, newShieldEvent, notifySkillCast, performGhostAttack,
-        starfallPulse, unitManaStep, tick, ROGUE_POTION, RARE_EQUIPS, applyTalents, normalizeTalentIds, applyTalentOnStart
+        starfallPulse, unitManaStep, tick, ROGUE_POTION, RARE_EQUIPS, applyTalents, normalizeTalentIds, applyTalentOnStart,
+        evoMaxStages, evoIntervalOf, evoHealBase, evoStageAt,
+        emptyStats, ensureStats, recordDealt, recordTaken, buildDamageStatsHtml,
+        updateSpiritGuard, recordHeal, applyHealTo, recordStun
     });
     // reflectGuard 是可变的 let,必须以 getter 暴露,否则机制钩子只能读到加载时的快照 0
     Object.defineProperty(globalThis, 'reflectGuard', { get: () => reflectGuard, configurable: true });
