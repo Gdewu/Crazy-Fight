@@ -212,18 +212,6 @@ window.addEventListener('unhandledrejection', function (e) { window.__err.push('
     <ul class="tt-stats" id="ttStats"></ul>
 </div>
 
-<!-- 天赋选择弹窗(与 index.html 保持一致, 便于冒烟覆盖 3v3 天赋 UI) -->
-<div id="talentModal">
-    <div class="modal-content talent-modal">
-        <h2 id="talentModalTitle">✨ 天赋</h2>
-        <div id="talentModalBody" class="talent-modal-body"></div>
-        <div class="talent-modal-tip">最多选择 3 个天赋；传说至多 1 个；不可重复。点击卡片选中/取消。</div>
-        <div class="talent-modal-actions">
-            <button id="talentCloseBtn" class="talent-close-btn">完成</button>
-        </div>
-    </div>
-</div>
-
 <script src="config.js"></script>
 <script src="heroes.js"></script>
 <script src="equips.js"></script>
@@ -297,18 +285,6 @@ window.addEventListener('unhandledrejection', function (e) { window.__err.push('
     run('立即结算', () => { R.rogueFinishNow(); return 'phase=' + R.ROGUE.phase; });
     run('结算界面', () => '按钮: ' + labels());
 
-    // ---- v2.9 天赋: 远征胜利结算「3 选 1」(可与 v2.9 两层关卡共存) ----
-    run('远征·结算→(胜利则)天赋3选1', () => {
-        press('确定');
-        return 'phase=' + R.ROGUE.phase + ' 天赋候选=' + (R.ROGUE.talentRewards || []).length +
-            ' 天赋字段=' + ['talentRewards', 'pickTalent', 'talentReplaceFor'].map(k => typeof R.ROGUE[k]).join('/') +
-            ' 按钮: ' + labels();
-    });
-    run('远征·跳过天赋(若在天赋结算)', () => {
-        if (R.ROGUE.phase === 'rewardTalent') press('跳过');
-        return 'phase=' + R.ROGUE.phase;
-    });
-
     // ---- 与普通的对战互不影响 ----
     run('普通对战·攻击一次', () => {
         const before = q('#log').innerHTML.length;
@@ -323,74 +299,6 @@ window.addEventListener('unhandledrejection', function (e) { window.__err.push('
         if (!c) return '没有进行中的关卡项(' + all('#rogueBody .rsl-card').length + ' 项)';
         c.click();
         return 'phase=' + R.ROGUE.phase + ' 选关层=' + R.ROGUE.layerSelect;
-    });
-
-    // 天赋用例统一走真实 UI 点击(面板在每次 rebuild 后会被重建, 故每次重新查询)
-    const panelA = () => all('#teamPanelsA .fighter-panel')[0];
-    const pickHero = (id) => {
-        panelA().querySelector('.hero-current').click();
-        panelA().querySelector('.hero-grid .hero-icon[data-id="' + id + '"]').click();
-    };
-    const openTalent = () => panelA().querySelector('.talent-open-btn').click();
-    const talentCards = () => all('#talentModalBody .talent-card');
-    const selCards = () => talentCards().filter(c => c.className.indexOf('selected') >= 0);
-    const talentTitle = () => q('#talentModalTitle').textContent.trim();
-    const panelTalents = () => panelA().querySelector('.talent-tags').textContent.trim();
-
-    // ---- v2.9 天赋系统: 3v3 编队弹窗 ----
-    run('天赋·定义表', () => (typeof TALENT_DEFS === 'object' && TALENT_DEFS) ? Object.keys(TALENT_DEFS).join('/') : 'TALENT_DEFS 未定义');
-    run('天赋·弹窗DOM', () => (q('#talentModal') && q('#talentModalBody')) ? 'OK' : 'MISSING');
-    run('天赋·切到魔剑士并打开弹窗', () => {
-        pickHero('magicSwordsman');
-        openTalent();
-        return 'display=' + q('#talentModal').style.display + ' 卡片=' + talentCards().length + ' 标题=' + talentTitle();
-    });
-    run('天赋·选普通+稀有', () => {
-        talentCards().filter(c => TALENT_DEFS[c.dataset.id].tier === 'common')[0].click();
-        talentCards().filter(c => TALENT_DEFS[c.dataset.id].tier === 'rare')[0].click();
-        return '标题=' + talentTitle() + ' 面板标签=' + panelTalents();
-    });
-    run('天赋·再选传说(满3个)', () => {
-        talentCards().filter(c => TALENT_DEFS[c.dataset.id].tier === 'legendary')[0].click();
-        return '标题=' + talentTitle() + ' 面板标签=' + panelTalents();
-    });
-    run('天赋·第4个被拒', () => {
-        const free = talentCards().filter(c => c.className.indexOf('selected') < 0)[0];
-        if (!free) return '没有未选卡片';
-        const before = talentTitle();
-        free.click();
-        return '点击后标题=' + talentTitle() + ' 未变=' + (before === talentTitle());
-    });
-    run('天赋·取消一个', () => {
-        selCards()[0].click();
-        return '标题=' + talentTitle();
-    });
-    run('天赋·关闭弹窗', () => {
-        q('#talentCloseBtn').click();
-        return 'display=' + q('#talentModal').style.display + ' 面板标签=' + panelTalents();
-    });
-    run('天赋·无池英雄提示开发中', () => {
-        pickHero('warrior');
-        openTalent();
-        const txt = q('#talentModalBody').textContent.trim();
-        q('#talentCloseBtn').click();
-        return txt;
-    });
-    run('天赋·蓄力(+0.1攻速)落到面板', () => {
-        pickHero('magicSwordsman');
-        const spd0 = panelA().querySelector('.spd-val').textContent.trim();
-        openTalent();
-        talentCards().filter(c => c.dataset.id === 'ms_charge')[0].click();
-        q('#talentCloseBtn').click();
-        return '攻速 ' + spd0 + ' → ' + panelA().querySelector('.spd-val').textContent.trim() + ' 标签=' + panelTalents();
-    });
-    run('天赋·原初之力开局星落', () => {
-        openTalent();
-        selCards().forEach(c => c.click());                       // 先清空
-        talentCards().filter(c => c.dataset.id === 'ms_origin')[0].click();
-        q('#talentCloseBtn').click();
-        q('#btnFight').click();                                   // 重建世界 → 开局星落
-        return '面板标签=' + panelTalents() + ' 日志含「原初之力」=' + (q('#log').textContent.indexOf('原初之力') >= 0);
     });
 
     say('脚本错误数', window.__err.length);
