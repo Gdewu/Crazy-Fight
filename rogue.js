@@ -121,6 +121,7 @@ const ROGUE = {
     talentRewards: [],    // v2.9 天赋: 胜利结算天赋 3 选 1
     pickTalent: null,     // v2.9 天赋: 当前选中的奖励/商店天赋 id
     talentReplaceFor: null, // v2.9 天赋: 满槽时待替换的新天赋 id
+    talentReplaceIdx: null, // v2.9 天赋: 满槽替换的目标队员下标(通用天赋用)
     result: null
 };
 let rogueWorld = null, rogueTimer = null, rogueLogRef = null, rogueLogShown = 0, rogueSpeed = 2;
@@ -447,6 +448,7 @@ function rogueSettleConfirm() {
             ROGUE.talentRewards = rogueRollTalentChoices(CONFIG.talent.rogueWinChoices);
             ROGUE.pickTalent = null;
             ROGUE.talentReplaceFor = null;
+            ROGUE.talentReplaceIdx = null;
             ROGUE.phase = 'rewardTalent';
         }
     } else {
@@ -458,7 +460,7 @@ function rogueSettleConfirm() {
 }
 // 天赋奖励结算后: 走原本的节点奖励分支
 function rogueAfterTalentReward() {
-    ROGUE.talentRewards = []; ROGUE.pickTalent = null; ROGUE.talentReplaceFor = null;
+    ROGUE.talentRewards = []; ROGUE.pickTalent = null; ROGUE.talentReplaceFor = null; ROGUE.talentReplaceIdx = null;
     if (ROGUE.node === 1) {
         ROGUE.phase = 'rewardEquip';
         ROGUE.poolEquips = rogueSample(equipListOfTier('normal'), 4);
@@ -475,12 +477,15 @@ function rogueAfterTalentReward() {
 // ---- v2.9 天赋池/装上 ----
 function rogueTalentPoolIds() {
     const pool = [];
+    const seen = {};
     (ROGUE.team || []).forEach(m => {
         const owned = normalizeTalentIds(m.talentIds || [], m.heroId);
         const hasLeg = owned.some(id => TALENT_DEFS[id] && TALENT_DEFS[id].tier === 'legendary');
         talentsOfHero(m.heroId).forEach(t => {
             if (owned.indexOf(t.id) >= 0) return;
             if (t.tier === 'legendary' && hasLeg) return;
+            if (seen[t.id]) return;   // 通用天赋跨队员去重
+            seen[t.id] = true;
             pool.push(t.id);
         });
     });
@@ -493,7 +498,7 @@ function rogueRollTalentChoices(n) {
 function rogueTalentCardHtml(id, cls, attrs, priceText) {
     const t = TALENT_DEFS[id];
     if (!t) return '';
-    const hero = HERO_DEFS[t.heroId] || {};
+    const hero = (t.heroId === '*') ? { emoji: '🌐', name: '通用' } : (HERO_DEFS[t.heroId] || {});
     const tier = TALENT_TIERS.find(x => x.key === t.tier) || { name: t.tier };
     const price = priceText ? `<div class="rp-price">${priceText}</div>` : '';
     return `<div class="rp-card talent-card-rp ${cls || ''}" ${attrs || ''} style="border-color:${tier.color || '#8e9aaf'}">
@@ -502,17 +507,38 @@ function rogueTalentCardHtml(id, cls, attrs, priceText) {
         <div class="rp-sub">${tier.name} · ${hero.emoji || ''}${hero.name || ''}</div>
         <div class="rp-sub">${t.desc}</div>${price}</div>`;
 }
-// 尝试装上; 满槽返回 'full', 非法返回 false, 成功 true
+function rogueTalentEligibleMembers(talentId) {
+    const def = TALENT_DEFS[talentId];
+    if (!def || !ROGUE.team) return [];
+    if (def.heroId === '*') return ROGUE.team.map((m, i) => ({ m, i }));
+    return ROGUE.team.map((m, i) => ({ m, i })).filter(x => x.m.heroId === def.heroId);
+}
+// 尝试装上; 满槽返回 {full:true, idx}, 非法返回 false, 成功 true
 function rogueTryApplyTalent(talentId) {
     const def = TALENT_DEFS[talentId];
     if (!def) return false;
-    const m = (ROGUE.team || []).filter(x => x.heroId === def.heroId)[0];
-    if (!m) return false;
-    const cur = normalizeTalentIds(m.talentIds || [], m.heroId);
-    if (cur.indexOf(talentId) >= 0) return false;
-    if (cur.length >= CONFIG.talent.maxSlots) return 'full';
+    const candidates = rogueTalentEligibleMembers(talentId);
+    if (!candidates.length) return false;
+    // 优先找有空槽且未持有该天赋的队员
+    let target = null;
+    for (let i = 0; i < candidates.length; i++) {
+        const m = candidates[i].m;
+        const cur = normalizeTalentIds(m.talentIds || [], m.heroId);
+        if (cur.indexOf(talentId) >= 0) continue;
+        if (cur.length < CONFIG.talent.maxSlots) { target = candidates[i]; break; }
+    }
+    if (!target) {
+        // 全部满槽且至少有一人未持有 → 进入替换
+        const full = candidates.find(x => {
+            const cur = normalizeTalentIds(x.m.talentIds || [], x.m.heroId);
+            return cur.indexOf(talentId) < 0;
+        });
+        if (full) return { full: true, idx: full.i };
+        return false;
+    }
+    const cur = normalizeTalentIds(target.m.talentIds || [], target.m.heroId);
     cur.push(talentId);
-    m.talentIds = normalizeTalentIds(cur, m.heroId);
+    target.m.talentIds = normalizeTalentIds(cur, target.m.heroId);
     return true;
 }
 function rogueRemoveTalent(heroId, talentId) {
@@ -770,18 +796,20 @@ function rogueBindLockWheel(startBtn) {
     selectLevel(ROGUE.difficulty, false);                // 初始停在当前选择
 }
 // v2.4: 战斗结算界面(胜/负 + 本场总伤害, 点「确定」后进入下一节点)
+// v2.9: 追加双方伤害统计(物理/魔法/真实 + 承受)
 function renderRogueSettle(phaseEl, body, actions) {
     const s = ROGUE.settle || { win: false, dmg: 0 };
     const nd = ROGUE_NODES[ROGUE.node] || ROGUE_NODES[0];
     phaseEl.textContent = `${nd.icon} ${nd.name} · 战斗结算`;
     const alive = rogueWorld ? rogueWorld.A.filter(u => u.hp > 0).length : 0;
+    const statsHtml = (typeof buildDamageStatsHtml === 'function' && rogueWorld) ? buildDamageStatsHtml(rogueWorld) : '';
     body.innerHTML = `<div class="rogue-settle ${s.win ? 'win' : 'lose'}">
         <div class="rs-title">${s.win ? '🏆 战斗胜利！' : '💔 战斗失败'}</div>
         <div class="rs-dmg">本场总伤害 <b>${s.dmg}</b></div>
         <div class="rs-sub">${s.win
             ? `我方存活 ${alive} 人　获得金币 +${ROGUE_GOLD_PER_BATTLE} 🪙`
             : `生命 -1（剩余 ${Math.max(0, ROGUE.lives - 1)} ♥）`}</div>
-    </div>`;
+    </div>${statsHtml}`;
     actions.appendChild(rogueBtn('确定', () => rogueSettleConfirm()));
 }
 // ① 出征选人: 随机 5 选 2 英雄 + 随机 5 选 1 普通装备
@@ -1247,9 +1275,12 @@ function renderRogueRewardTalent(phaseEl, body, actions) {
     // 满槽替换: 列出目标英雄已有天赋, 点击即替换
     if (ROGUE.talentReplaceFor && TALENT_DEFS[ROGUE.talentReplaceFor]) {
         const def = TALENT_DEFS[ROGUE.talentReplaceFor];
-        const m = ROGUE.team.filter(x => x.heroId === def.heroId)[0];
+        const m = (typeof ROGUE.talentReplaceIdx === 'number' && ROGUE.team)
+            ? ROGUE.team[ROGUE.talentReplaceIdx]
+            : ROGUE.team.filter(x => x.heroId === def.heroId)[0];
         const owned = m ? normalizeTalentIds(m.talentIds || [], m.heroId) : [];
-        html += `<div class="rp-title" style="margin-top:10px">请选择要被替换的天赋（${HERO_DEFS[def.heroId].name}）</div><div class="rogue-pick">`;
+        const heroName = m ? (HERO_DEFS[m.heroId] || {}).name : (def.heroId === '*' ? '通用' : (HERO_DEFS[def.heroId] || {}).name);
+        html += `<div class="rp-title" style="margin-top:10px">请选择要被替换的天赋（${heroName || ''}）</div><div class="rogue-pick">`;
         html += owned.map(id => rogueTalentCardHtml(id, '', `data-replace="${id}"`, '点击替换')).join('');
         html += `</div>`;
     }
@@ -1259,6 +1290,7 @@ function renderRogueRewardTalent(phaseEl, body, actions) {
         card.addEventListener('click', () => {
             ROGUE.pickTalent = card.dataset.talent;
             ROGUE.talentReplaceFor = null;
+            ROGUE.talentReplaceIdx = null;
             renderRogue();
         });
     });
@@ -1268,7 +1300,9 @@ function renderRogueRewardTalent(phaseEl, body, actions) {
             const oldId = card.dataset.replace;
             if (!newId) return;
             const def = TALENT_DEFS[newId];
-            const m = ROGUE.team.filter(x => x.heroId === def.heroId)[0];
+            let m = null;
+            if (typeof ROGUE.talentReplaceIdx === 'number' && ROGUE.team) m = ROGUE.team[ROGUE.talentReplaceIdx];
+            else if (def) m = ROGUE.team.filter(x => x.heroId === def.heroId)[0];
             if (!m) return;
             m.talentIds = normalizeTalentIds(
                 (m.talentIds || []).filter(id => id !== oldId).concat([newId]),
@@ -1283,8 +1317,9 @@ function renderRogueRewardTalent(phaseEl, body, actions) {
     const ok = rogueBtn('确定选择', () => {
         if (!ROGUE.pickTalent) { rogueToast('请选择 1 个天赋，或点「跳过」'); return; }
         const r = rogueTryApplyTalent(ROGUE.pickTalent);
-        if (r === 'full') {
+        if (r && typeof r === 'object' && r.full) {
             ROGUE.talentReplaceFor = ROGUE.pickTalent;
+            ROGUE.talentReplaceIdx = r.idx;
             renderRogue();
             return;
         }
@@ -1517,8 +1552,8 @@ function renderRogueShop(phaseEl, body, actions) {
             if (ROGUE.gold < it.price) { rogueToast('金币不足'); return; }
             if (kind === 'talent') {
                 const r = rogueTryApplyTalent(it.id);
-                if (r === 'full') {
-                    rogueToast('该英雄天赋已满，请先在整备界面卸下一个');
+                if (r && typeof r === 'object' && r.full) {
+                    rogueToast('该队员天赋已满，请先在整备界面卸下一个');
                     return;
                 }
                 if (r === false) { rogueToast('无法装上该天赋'); return; }
