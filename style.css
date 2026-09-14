@@ -1,0 +1,617 @@
+/* ========== 全局样式 ========== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#0a0a18; min-height:100vh; display:flex; justify-content:center; align-items:center; font-family:'Segoe UI',Arial,sans-serif; padding:16px; }
+
+/* ---------- 启动界面 ---------- */
+#startScreen {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(circle at center, #1a1a3a, #0a0a18);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    /* safe center: 内容超过一屏时改为从顶部开始排列, 避免标题被裁掉且滚不上去 */
+    justify-content: safe center;
+    align-items: center;
+    z-index: 99999;
+    color: #e8e8e8;
+    transition: opacity 0.6s ease, visibility 0.6s ease;
+    overflow-y: auto;
+    padding: 20px;
+}
+#startScreen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+#startScreen .header { text-align: center; margin-bottom: 10px; }
+#startScreen h1 { font-size: 48px; font-weight: 300; letter-spacing: 8px; margin-bottom: 6px; text-shadow: 0 0 40px rgba(245,200,66,0.3); }
+#startScreen .start-btn { background: #f5c842; color: #0a0a18; border: none; border-radius: 60px; padding: 14px 50px; font-size: 22px; font-weight: bold; cursor: pointer; transition: 0.3s; box-shadow: 0 0 30px rgba(245,200,66,0.3); margin: 12px 0 12px; }
+#startScreen .start-btn:hover { transform: scale(1.08); box-shadow: 0 0 50px rgba(245,200,66,0.6); }
+/* 版本号 + 更新日志: 收成一张居中的小卡片, 版本号做金色胶囊, 避免长文本左对齐糊成一片 */
+#startScreen .version {
+    max-width: 760px; margin: 0 auto 12px; padding: 7px 14px 8px;
+    background: rgba(26,32,54,0.85); border: 1px solid #2a3350; border-radius: 10px;
+    color: #8ea2c4; font-size: 12.5px; line-height: 1.75; text-align: center;
+}
+#startScreen .version .v-num {
+    display: inline-block; background: #f5c842; color: #0a0a18;
+    border-radius: 10px; padding: 0 10px; margin: 0 6px 0 0;
+    font-size: 12px; font-weight: bold; letter-spacing: 0.5px; vertical-align: 1px;
+}
+#startScreen .btn-group { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 12px; }
+#startScreen .btn-group button { background: #2a3a5e; color: #e8e8e8; border: 1px solid #3a4a6e; border-radius: 30px; padding: 6px 20px; font-size: 14px; cursor: pointer; transition: 0.2s; }
+#startScreen .btn-group button:hover { background: #3a5a8e; transform: scale(1.05); }
+#startScreen .equip-library { width: 90%; max-width: 700px; max-height: 45vh; overflow-y: auto; background: rgba(20,20,50,0.9); border-radius: 16px; border: 1px solid #2a3a5e; padding: 12px 16px; margin-top: 6px; display: none; }
+#startScreen .equip-library.open { display: block; }
+#startScreen .equip-library h3 { color: #f5c842; text-align: center; border-bottom: 1px solid #2a3a5e; padding-bottom: 8px; margin-bottom: 10px; font-weight: 400; letter-spacing: 2px; }
+#startScreen .equip-library .equip-item { background: #0e0e22; border-radius: 10px; padding: 8px 14px; margin-bottom: 8px; border: 1px solid #2a2a4a; position: relative; }
+#startScreen .equip-library .equip-item .e-name { color: #f5c842; font-weight: bold; font-size: 15px; }
+#startScreen .equip-library .equip-item .e-desc { color: #b0c4de; font-size: 13px; margin: 2px 0; }
+#startScreen .equip-library .equip-item .e-stats { color: #8899bb; font-size: 12px; list-style: none; padding: 0; margin: 4px 0 0; }
+#startScreen .equip-library .equip-item .e-stats li { padding: 1px 0; border-bottom:1px solid #2a2a4a; }
+#startScreen .equip-library .equip-item .e-stats li:last-child { border-bottom:none; }
+#startScreen .equip-library .rare-badge { position: absolute; top: 6px; right: 10px; background: #6c3483; color: #f5b7f1; padding: 0 10px; border-radius: 12px; font-size: 11px; border: 1px solid #9b59b6; }
+#startScreen .equip-library::-webkit-scrollbar { width:4px; }
+#startScreen .equip-library::-webkit-scrollbar-thumb { background:#2a3a5e; border-radius:10px; }
+
+/* 全局规则 / 模拟统计 模态框 */
+#rulesModal, #heroModal, #challengeModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; align-items: safe center; z-index: 100000; }
+#rulesModal .modal-content, #heroModal .modal-content, #challengeModal .modal-content { background: #1a1a3a; border: 2px solid #5dade2; border-radius: 20px; padding: 20px 30px; max-width: 560px; width: 92%; color: #b0c4de; box-shadow: 0 20px 60px rgba(0,0,0,0.9); }
+#heroModal .modal-content, #challengeModal .modal-content { max-width: 720px; max-height: 88vh; overflow-y: auto; }
+/* 全局规则: 内容必然超过一屏, 由弹窗整体滚动(单个滚动条);
+   否则内容被垂直居中 + 无高度上限, 上半部分(标题/「游戏玩法」折叠头)与底部「关闭」会被裁到屏幕外 */
+#rulesModal .modal-content { max-height: 88vh; overflow-y: auto; }
+#rulesModal .modal-content h2, #heroModal .modal-content h2, #challengeModal .modal-content h2 { color: #f5c842; text-align: center; border-bottom: 1px solid #2a3a5e; padding-bottom: 10px; margin-bottom: 12px; }
+#rulesModal .modal-content ul { list-style: none; padding: 0; }
+#rulesModal .modal-content ul li { padding: 6px 0; border-bottom: 1px solid #2a2a4a; font-size: 13px; line-height: 1.6; }
+#rulesModal .modal-content ul li:last-child { border-bottom: none; }
+#rulesModal .modal-content ul li strong { color: #f5c842; }
+#rulesModal .modal-close, #heroModal .modal-close, #challengeModal .modal-close { display: block; margin: 14px auto 0; background: #2c3e50; color: #fff; border: none; border-radius: 30px; padding: 8px 30px; font-size: 14px; cursor: pointer; transition: 0.2s; }
+#rulesModal .modal-close:hover, #heroModal .modal-close:hover, #challengeModal .modal-close:hover { background: #e74c3c; }
+
+/* ---------- 人物介绍 / 挑战队伍(复用「装备大全」的条目样式) ---------- */
+#heroModal .equip-item, #challengeModal .equip-item { background:#0e0e22; border-radius:10px; padding:8px 14px; margin-bottom:8px; border:1px solid #2a2a4a; position:relative; }
+#heroModal .e-name, #challengeModal .e-name { color:#f5c842; font-weight:bold; font-size:15px; }
+#heroModal .e-desc, #challengeModal .e-desc { color:#b0c4de; font-size:13px; margin:2px 0; }
+#heroModal .e-stats, #challengeModal .e-stats { color:#8899bb; font-size:12px; list-style:none; padding:0; margin:4px 0 0; }
+#heroModal .e-stats li, #challengeModal .e-stats li { padding:1px 0; border-bottom:1px solid #2a2a4a; }
+#heroModal .e-stats li:last-child, #challengeModal .e-stats li:last-child { border-bottom:none; }
+#heroModal .rare-badge, #challengeModal .rare-badge { position:absolute; top:6px; right:10px; background:#6c3483; color:#f5b7f1; padding:0 10px; border-radius:12px; font-size:11px; border:1px solid #9b59b6; }
+#challengeModal .ch-load { display:block; margin:8px 0 0 auto; background:#1a1a3a; color:#f5c842; border:1px solid #5a4a1a; border-radius:16px; padding:4px 18px; font-size:12px; cursor:pointer; transition:0.2s; }
+#challengeModal .ch-load:hover { background:#2b3557; }
+/* v2.6: 挑战队伍新增「调用到 A 队」按钮, 两个按钮横排右对齐 */
+#challengeModal .ch-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+#challengeModal .ch-actions .ch-load { margin:0; }
+#challengeModal .ch-load-a { background:#12283a; color:#7fd4f5; border-color:#1a4a5a; }
+#challengeModal .ch-load-a:hover { background:#1b3b52; }
+.challenge-btn { background:#2a1a1a; color:#f5c842; border-color:#5a4a1a; }
+.challenge-btn:hover { background:#3a2a1a; }
+
+/* ---------- 游戏容器 ---------- */
+.container { background:#14142a; padding:18px 20px; border-radius:24px; box-shadow:0 20px 60px rgba(0,0,0,0.9); width:1500px; max-width:100%; border:1px solid #2a2a4a; display:flex; flex-direction:column; position:relative; margin: 0 auto; }
+.back-btn { position: absolute; top: 12px; right: 18px; background: #2c3e50; color: #fff; border: none; border-radius: 30px; padding: 4px 16px; font-size: 13px; cursor: pointer; transition: 0.2s; z-index: 10; }
+.back-btn:hover { background: #e74c3c; transform: scale(1.05); }
+
+h1 { text-align:center; color:#e8e8e8; font-weight:400; letter-spacing:4px; font-size:22px; border-bottom:1px solid #2a3a5e; padding-bottom:8px; margin-bottom:12px; margin-top:0; }
+.main-layout { display:flex; gap:16px; align-items:stretch; }
+.left-area { flex:1.7; display:flex; flex-direction:column; gap:12px; min-width:0; }
+
+/* ---------- 队伍对战区 ---------- */
+.arena { display:flex; justify-content:space-between; align-items:stretch; gap:10px; }
+.team { flex:1; min-width:0; display:flex; flex-direction:column; background:#0c0c1e; border-radius:18px; border:1px solid #23234a; padding:8px 8px 10px; gap:6px; }
+.team#teamA { border-color:#1f3a5c; box-shadow: inset 0 0 40px rgba(93,173,226,0.05); }
+.team#teamB { border-color:#4a2030; box-shadow: inset 0 0 40px rgba(231,76,60,0.05); }
+.team-header { display:flex; align-items:center; justify-content:center; gap:8px; padding-bottom:4px; border-bottom:1px solid #2a2a4a; }
+.team-name { font-size:13px; letter-spacing:2px; font-weight:600; color:#e8e8e8; }
+.team#teamA .team-name { color:#5dade2; }
+.team#teamB .team-name { color:#e74c3c; }
+.team-count { font-size:11px; color:#667799; background:#14142a; border-radius:10px; padding:1px 8px; border:1px solid #2a2a4a; }
+/* ---------- 阵型网格: 每队 3 列 × 2 行 = 6 个站位格 ---------- */
+.team-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; align-items:stretch; }
+.team-grid > [data-row="0"] { grid-row: 1; }
+.team-grid > [data-row="1"] { grid-row: 2; }
+/* A队列序从左到右;B队镜像,保证两队的「前排」都紧邻中间 VS 分界 */
+#teamA .team-grid > [data-col="0"] { grid-column: 1; }
+#teamA .team-grid > [data-col="1"] { grid-column: 2; }
+#teamA .team-grid > [data-col="2"] { grid-column: 3; }
+#teamB .team-grid > [data-col="0"] { grid-column: 3; }
+#teamB .team-grid > [data-col="1"] { grid-column: 2; }
+#teamB .team-grid > [data-col="2"] { grid-column: 1; }
+/* 中间列(默认核心位)金色描边 */
+.team-grid > [data-col="1"].fighter-panel { border-color:#4a4020; }
+.team-grid > [data-col="1"].fighter-panel.dead { border-color:#e74c3c; }
+
+/* 空格子: 点击放置队员,也是拖动落点 */
+.cell-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; min-height:104px; border:1px dashed #2a3a5e; border-radius:12px; background:rgba(16,16,42,0.45); color:#3a4a6e; cursor:pointer; transition:0.2s; }
+.cell-empty:hover { border-color:#f5c842; color:#f5c842; background:#16162e; transform:translateY(-1px); }
+.cell-empty .plus { font-size:18px; line-height:1; }
+.cell-empty .cell-tip { font-size:9px; color:#445566; letter-spacing:1px; }
+
+.fighter-panel { background:#10102a; border-radius:12px; padding:6px 4px 8px; min-width:0; text-align:center; border:2px solid #2a2a4a; transition:0.3s; position:relative; cursor:grab; animation: panelIn 0.3s ease; }
+@keyframes panelIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+.fighter-panel:hover { border-color:#3a3a6a; }
+.fighter-panel.active { border-color:#f5c842; box-shadow:0 0 25px rgba(245,200,66,0.15); }
+.fighter-panel.dead { opacity:0.4; border-color:#e74c3c; }
+/* 拖动换位反馈 */
+.fighter-panel.dragging { opacity:0.45; transform:scale(0.96); cursor:grabbing; }
+.fighter-panel.drop-target, .cell-empty.drop-target { border-color:#5dade2 !important; box-shadow:0 0 14px rgba(93,173,226,0.45); background:#14143a; }
+
+.panel-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:2px; }
+.slot-badge { font-size:9px; letter-spacing:1px; color:#667799; background:#14142a; border:1px solid #2a2a4a; border-radius:10px; padding:0 6px; }
+.fighter-panel[data-slot="0"] .slot-badge { color:#f5c842; border-color:#5a4a20; background:#221c0a; }
+.remove-slot { background:transparent; border:1px solid #2a2a4a; color:#556; border-radius:6px; width:16px; height:16px; line-height:1; font-size:9px; cursor:pointer; transition:0.2s; padding:0; }
+.remove-slot:hover { background:#e74c3c; color:#fff; border-color:#e74c3c; transform:scale(1.1); }
+.remove-slot:disabled { opacity:0.25; cursor:not-allowed; }
+.add-slot { align-self:center; margin-top:2px; width:80%; background:#14142a; color:#667799; border:1px dashed #3a4a6e; border-radius:12px; padding:3px 0; font-size:11px; cursor:pointer; transition:0.2s; }
+.add-slot:hover { color:#f5c842; border-color:#f5c842; background:#1a1a3a; }
+.add-slot:disabled { opacity:0.3; cursor:not-allowed; }
+
+.hero-selector { display:flex; flex-direction:column; align-items:center; margin-bottom:2px; cursor:pointer; }
+.hero-current { display:flex; align-items:center; gap:4px; background:#1a1a3a; padding:1px 8px 1px 6px; border-radius:30px; border:2px solid #2a2a4a; transition:0.2s; }
+.hero-current:hover { border-color:#5dade2; background:#22224a; }
+.hero-current .h-emoji { font-size:16px; }
+.hero-current .h-name { font-size:11px; font-weight:bold; color:#fff; }
+.hero-current .h-arrow { color:#667799; font-size:9px; margin-left:1px; }
+.hero-grid { display:none; flex-wrap:wrap; gap:3px; justify-content:center; margin-top:4px; background:#0e0e22; padding:5px; border-radius:12px; border:1px solid #2a2a4a; width:100%; position:absolute; left:0; top:100%; z-index:50; box-shadow:0 10px 30px rgba(0,0,0,0.8); }
+.hero-grid.open { display:flex; }
+.hero-grid .hero-icon { background:#1a1a3a; border:2px solid #2a2a4a; border-radius:8px; padding:2px 5px; cursor:pointer; transition:0.2s; display:flex; flex-direction:column; align-items:center; min-width:40px; font-size:9px; color:#8899bb; }
+.hero-grid .hero-icon:hover { background:#2a2a5a; border-color:#4a4a8a; transform:scale(1.05); }
+.hero-grid .hero-icon.selected { border-color:#f5c842; background:#2a2a4a; box-shadow:0 0 15px rgba(245,200,66,0.2); }
+.hero-grid .hero-icon .h-emoji { font-size:16px; }
+.hero-grid .hero-icon .h-name { font-size:8px; margin-top:0px; color:#aaa; }
+
+.fighter-panel .name { font-size:13px; font-weight:bold; color:#fff; margin-top:0px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fighter-panel .emoji { font-size:20px; display:block; margin:0px; }
+.fighter-panel .stat { color:#8899bb; font-size:10px; margin:1px 0; }
+.fighter-panel .stat span { color:#fff; font-weight:bold; }
+.fighter-panel .stat .label { color:#667799; font-weight:normal; }
+/* v2.7 动态数值: 机制加成(如长枪手独守阵线 +20 攻击力)生效时高亮显示 */
+.fighter-panel .stat .atk-val.buffed { color:#2ecc71 !important; text-shadow:0 0 4px rgba(46,204,113,0.6); }
+.hp-bar-bg { width:100%; height:10px; background:#1a1a30; border-radius:20px; overflow:hidden; margin:3px 0 1px; border:1px solid #2a2a4a; }
+.hp-bar { height:100%; width:100%; background:#27ae60; border-radius:20px; transition:width 0.25s ease; }
+.hp-bar.low { background:#e67e22; }
+.hp-bar.critical { background:#e74c3c; }
+.hp-text { color:#99aabb; font-size:10px; font-weight:bold; }
+.cd-bar-bg { width:100%; height:4px; background:#1a1a30; border-radius:20px; overflow:hidden; margin:1px 0 1px; border:1px solid #2a2a2a; }
+.cd-bar { height:100%; width:0%; background:#f39c12; border-radius:20px; transition:width 0.2s ease; }
+.cd-bar.ready { background:#2ecc71; box-shadow:0 0 10px #2ecc71aa; }
+.cd-text { color:#f39c12; font-size:9px; display:flex; justify-content:space-between; }
+.cd-text .ready-label { color:#2ecc71; }
+.cd-area { display:none; }
+.mana-area { display:none; }
+.blue-bar-bg { width:100%; height:4px; background:#1a1a30; border-radius:20px; overflow:hidden; margin:1px 0 1px; border:1px solid #1a2a4a; }
+.blue-bar { height:100%; width:0%; background:#3498db; border-radius:20px; transition:width 0.2s ease; }
+.blue-text { color:#5dade2; font-size:9px; }
+.status-area { display:flex; justify-content:center; gap:3px; flex-wrap:wrap; margin-top:1px; min-height:16px; }
+.status-badge { display:inline-block; background:#1a1a30; border-radius:12px; padding:0 6px; font-size:9px; border:1px solid #2a2a4a; color:#b0c4de; line-height:15px; }
+.status-badge.curse { border-color:#9b59b6; color:#d7bde2; background:#2a1a3a; }
+.status-badge.evo { border-color:#f39c12; color:#f5c842; background:#2a2a1a; }
+.status-badge.silenced { border-color:#e67e22; color:#f5c842; background:#2a1a1a; }
+.status-badge.fighter { border-color:#e74c3c; color:#f1948a; background:#2a1a1a; }
+.status-badge .badge-icon { margin-right:1px; }
+.armor-tag { display:inline-block; background:#1a2a3a; padding:0 4px; border-radius:8px; font-size:9px; color:#5dade2; margin:0 1px; }
+.equip-tag { display:inline-block; background:#1a2a3a; padding:0 5px; border-radius:8px; font-size:9px; color:#f5c842; margin:0 1px; cursor:default; white-space:nowrap; }
+.equip-tag.rare { background: #6c3483; border:1px solid #9b59b6; color: #f5b7f1; box-shadow: 0 0 10px rgba(155,89,182,0.4); }
+.equip-tag.disabled { opacity: 0.4; cursor: not-allowed; }
+.equip-selector { margin-top:4px; display:flex; align-items:center; justify-content:center; gap:3px; font-size:10px; color:#8899bb; flex-wrap:wrap; }
+.equip-selector select { background:#1a1a3a; color:#e0e0e0; border:1px solid #2a3a5e; border-radius:6px; padding:1px 4px; font-size:10px; cursor:pointer; outline:none; font-family:inherit; width:88px; max-width:100%; }
+.equip-selector select:focus { border-color:#5dade2; }
+.equip-selector select option { background:#1a1a3a; color:#e0e0e0; }
+.equip-selector select:disabled { opacity:0.5; cursor:not-allowed; }
+.equip-selector .slot-label { color:#667799; font-size:9px; }
+.equip-tags { display:flex; justify-content:center; gap:3px; flex-wrap:wrap; margin-top:2px; }
+
+.vs { color:#f5c842; font-size:18px; font-weight:bold; text-shadow:0 0 30px rgba(245,200,66,0.2); flex-shrink:0; display:flex; align-items:center; padding:0 2px; }
+.right-area { flex:1; min-width:190px; display:flex; flex-direction:column; background:#0e0e22; border-radius:16px; border:1px solid #2a2a4a; padding:10px 12px; height:auto; max-height:600px; }
+.right-area .title { color:#8899bb; font-size:12px; letter-spacing:2px; border-bottom:1px solid #2a3a5e; padding-bottom:4px; margin-bottom:6px; text-align:center; }
+.log { flex:1; overflow-y:auto; color:#8899bb; font-size:12px; line-height:1.5; font-family:'Courier New',monospace; padding-right:2px; }
+.log::-webkit-scrollbar { width:4px; }
+.log::-webkit-scrollbar-thumb { background:#2a3a5e; border-radius:10px; }
+.log .highlight { color:#f5c842; font-weight:bold; }
+.log .damage { color:#e74c3c; font-weight:bold; }
+.log .heal { color:#2ecc71; }
+.log .armor { color:#5dade2; }
+.log .curse { color:#9b59b6; font-weight:bold; }
+.log .mana { color:#5dade2; }
+.log .silence { color:#e67e22; font-weight:bold; }
+.controls { display:flex; gap:8px; justify-content:center; margin:8px 0 4px; flex-wrap:wrap; }
+.controls button { padding:6px 16px; border:none; border-radius:40px; font-size:13px; font-weight:bold; cursor:pointer; transition:0.2s; background:#2a2a4a; color:#ccc; }
+.controls button:hover { transform:scale(1.05); filter:brightness(1.2); }
+.controls button:active { transform:scale(0.95); }
+.btn-fight { background:#e67e22 !important; color:#fff !important; }
+.btn-reset { background:#2c3e50 !important; color:#fff !important; }
+.btn-auto { background:#2980b9 !important; color:#fff !important; }
+.btn-auto.stop { background:#c0392b !important; }
+/* 自动战斗倍速按钮 */
+.speed-group { display:flex; gap:4px; align-items:center; margin-left:6px; }
+.speed-group .speed-btn { padding:5px 12px; font-size:12px; background:#1a1a3a; color:#8899bb; border:1px solid #2a3a5e; border-radius:40px; }
+.speed-group .speed-btn:hover { transform:scale(1.05); filter:brightness(1.2); }
+.speed-group .speed-btn.active { color:#f5c842; border-color:#f5c842; box-shadow: 0 0 12px rgba(245,200,66,0.35); }
+.winner-banner { text-align:center; font-size:20px; font-weight:bold; margin:4px 0; color:#f1c40f; text-shadow:0 0 40px rgba(241,196,15,0.3); display:none; animation: bannerIn 0.4s ease; }
+@keyframes bannerIn { from { opacity:0; transform:scale(0.9); } to { opacity:1; transform:scale(1); } }
+.footer { display:flex; justify-content:space-between; color:#445566; font-size:10px; margin-top:4px; }
+
+/* ---------- 装备详情浮窗 ---------- */
+.equip-tooltip { position: fixed; background: #1a1a3a; border: 1px solid #5dade2; border-radius: 12px; padding: 10px 14px; max-width: 280px; color: #b0c4de; font-size: 13px; line-height: 1.5; box-shadow: 0 8px 30px rgba(0,0,0,0.8); pointer-events: none; z-index: 9999; display: none; font-family: 'Segoe UI', Arial, sans-serif; }
+.equip-tooltip .tt-name { color:#f5c842; font-weight:bold; font-size:15px; margin-bottom:4px; }
+.equip-tooltip .tt-desc { color:#b0c4de; margin-bottom:6px; }
+.equip-tooltip .tt-stats { color:#8899bb; font-size:12px; list-style:none; padding:0; margin:4px 0 0; }
+.equip-tooltip .tt-stats li { padding:1px 0; border-bottom:1px solid #2a2a4a; }
+.equip-tooltip .tt-stats li:last-child { border-bottom:none; }
+.equip-tooltip .tt-stats .stat-val { color:#fff; font-weight:bold; }
+
+/* ---------- 阵型格内的紧凑排版(每格约占队伍宽度 1/3) ---------- */
+.team-grid .fighter-panel .emoji { font-size:16px; }
+.team-grid .fighter-panel .name { font-size:11px; }
+.team-grid .fighter-panel .stat { font-size:9px; }
+.team-grid .hero-current { padding:1px 5px 1px 4px; border-width:1px; }
+.team-grid .hero-current .h-emoji { font-size:13px; }
+.team-grid .hero-current .h-name { font-size:10px; }
+.team-grid .hero-current .h-arrow { font-size:8px; }
+.team-grid .equip-tag { font-size:8px; padding:0 3px; }
+.team-grid .equip-selector { flex-direction:column; gap:2px; margin-top:3px; }
+.team-grid .equip-selector .slot-label { display:none; }
+.team-grid .equip-selector select { width:100%; font-size:9px; }
+.team-grid .status-badge { font-size:8px; padding:0 4px; }
+.team-grid .slot-badge { font-size:8px; padding:0 4px; }
+.team-grid .armor-tag { font-size:8px; padding:0 3px; }
+.team-grid .fighter-panel .hp-text { font-size:9px; }
+.team-grid .remove-slot { width:14px; height:14px; font-size:8px; }
+.team-grid .hero-grid { padding:4px; gap:2px; }
+.team-grid .hero-grid .hero-icon { min-width:34px; padding:1px 4px; }
+.team-grid .hero-grid .hero-icon .h-emoji { font-size:14px; }
+.team-grid .hero-grid .hero-icon .h-name { font-size:7px; }
+
+@media (max-width:1100px) {
+    .container { width:100%; padding:14px 10px; }
+    .team-grid .fighter-panel .emoji { font-size:14px; }
+    .team-grid .cell-empty { min-height:86px; }
+    .right-area { min-width:160px; }
+}
+
+/* ---------- 矮屏适配: 2×3 阵型纵向占用较大,压缩留白避免整页滚动 ---------- */
+@media (max-height:860px) {
+    h1 { font-size:18px; padding-bottom:6px; margin-bottom:8px; }
+    .arena { padding:8px; gap:8px; }
+    .team { padding:6px 6px 8px; gap:4px; }
+    .team-header { padding-bottom:2px; }
+    .team-grid { gap:4px; }
+    .team-grid .cell-empty { min-height:78px; }
+    .team-grid .fighter-panel { padding:4px 3px 6px; }
+    .team-grid .fighter-panel .emoji { font-size:14px; }
+    .team-grid .fighter-panel .hp-text { font-size:8px; }
+    .team-grid .status-area { min-height:0; }
+    .log { min-height:100px; }
+    .controls { margin:6px 0 2px; }
+    .controls button { padding:5px 12px; font-size:12px; }
+}
+
+@media (max-width:820px) {
+    .main-layout { flex-direction:column; }
+    .right-area { max-height:250px; }
+    .arena { flex-direction:column; align-items:center; }
+    .team { width:100%; }
+    .vs { padding:4px 0; }
+    #startScreen h1 { font-size: 28px; }
+    #startScreen .start-btn { padding: 12px 30px; font-size: 18px; }
+    #startScreen .equip-library { max-height: 40vh; }
+    .back-btn { top:6px; right:10px; font-size:11px; padding:2px 12px; }
+    .equip-selector select { width:80px; font-size:10px; }
+    .team-grid .equip-selector { flex-direction:row; }
+    .team-grid .equip-selector select { width:72px; }
+    .team-grid .cell-empty { min-height:64px; }
+}
+
+/* ============================================================
+   v4.3 新增: 规则折叠区 / 人物介绍 / 编队 / 装备点
+   ============================================================ */
+
+/* 全局规则: 「游戏玩法」/「游戏机制」折叠区 */
+.rule-section { margin-bottom:10px; border:1px solid #2a3350; border-radius:8px; overflow:hidden; }
+.rule-head {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 14px; cursor:pointer; user-select:none;
+    background:#1b2138; color:#e8ecf5; font-weight:bold; font-size:14px;
+}
+.rule-head:hover { background:#232a47; }
+.rule-arrow { font-size:11px; color:#8899bb; transition:transform .2s; }
+.rule-head.collapsed .rule-arrow { transform:rotate(-90deg); }
+.rule-body {
+    margin:0; padding:10px 14px 12px 30px; background:#141a2e;
+    /* 不再单独滚动: 统一由 #rulesModal .modal-content 滚动, 避免嵌套滚动条且保证内容不被裁 */
+}
+.rule-body.collapsed { display:none; }
+.rule-body li { margin-bottom:6px; font-size:12.5px; line-height:1.6; color:#b9c4dd; }
+.rule-body strong { color:#e8ecf5; }
+
+/* 装备点提示 */
+.equip-points { font-size:10px; color:#8899bb; text-align:center; margin-top:2px; }
+
+/* ============================================================
+   v4.7 新增: 伤害配色 / 折叠区通用容器 / 装备分档徽章
+   ============================================================ */
+
+/* 战斗日志伤害配色: 物理=红色, 真实=白色加粗, 魔法=蓝色 */
+.log .dmg-physical { color:#e74c3c; font-weight:bold; }
+.log .dmg-magic { color:#5dade2; font-weight:bold; }
+.log .dmg-true { color:#ffffff; font-weight:bold; text-shadow:0 0 6px rgba(255,255,255,0.45); }
+
+/* 折叠区通用容器(人物介绍 / 装备大全 复用「全局规则」的折叠头样式) */
+.collapse-body { display:block; padding:10px 12px 12px; background:#141a2e; }
+.collapse-body.collapsed { display:none; }
+#startScreen .equip-library .collapse-body { background:transparent; padding:6px 0 2px; }
+#heroModal .collapse-body { background:transparent; padding:8px 0 2px; }
+
+/* 装备分档徽章: 特殊装备(不消耗装备点) */
+#startScreen .equip-library .rare-badge.special-badge,
+#heroModal .rare-badge.special-badge { background:#0f4c5c; color:#a8e6f5; border-color:#5dade2; }
+
+/* 装备标签: 特殊装备(青色) */
+.equip-tag.special { background:#0f4c5c; border:1px solid #5dade2; color:#a8e6f5; box-shadow:0 0 10px rgba(93,173,226,0.35); }
+
+/* ============================================================
+   v2.0 新增: 远征挑战(肉鸽模式)
+   ============================================================ */
+.rogue-entry-btn { background:#3a2a5e !important; color:#f5c842 !important; border-color:#7d5fff !important; }
+
+#rogueModal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); display:none; justify-content:center; align-items:center; z-index:100000; }
+#rogueModal .modal-content { background:#1a1a3a; border:2px solid #5dade2; border-radius:20px; padding:18px 26px; max-width:920px; width:94%; max-height:92vh; overflow-y:auto; color:#b0c4de; box-shadow:0 20px 60px rgba(0,0,0,0.9); }
+#rogueModal .modal-content h2 { color:#f5c842; text-align:center; border-bottom:1px solid #2a3a5e; padding-bottom:10px; margin-bottom:12px; }
+#rogueModal .modal-close { display:block; margin:12px auto 0; background:#2c3e50; color:#fff; border:none; border-radius:30px; padding:8px 30px; font-size:14px; cursor:pointer; }
+#rogueModal .modal-close:hover { background:#e74c3c; }
+
+.rogue-top { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
+.rogue-status { display:flex; align-items:center; gap:16px; flex-shrink:0; }
+.rogue-lives { color:#ff6b6b; font-size:15px; letter-spacing:2px; }
+.rogue-gold { color:#f5c842; font-size:15px; }
+.rogue-map { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.rogue-node { padding:3px 10px; border-radius:14px; border:1px solid #2a3a5e; background:#141a2e; color:#8899bb; font-size:11px; text-align:center; line-height:1.35; }
+.rogue-node .rn-sub { display:block; font-size:9px; color:#5a6a88; }
+.rogue-node.current { border-color:#f5c842; color:#f5c842; box-shadow:0 0 12px rgba(245,200,66,0.35); }
+.rogue-node.current .rn-sub { color:#a8935a; }
+.rogue-node.done { border-color:#2ecc71; color:#2ecc71; }
+.rogue-link { color:#3a4a6e; font-size:11px; }
+.rogue-phase { text-align:center; color:#f5c842; font-size:13px; margin-bottom:6px; }
+.rogue-toast { text-align:center; color:#ff6b6b; font-size:12px; min-height:16px; margin-bottom:4px; }
+.rogue-body { max-height:54vh; overflow-y:auto; background:#0e0e22; border:1px solid #2a2a4a; border-radius:10px; padding:10px; }
+.rogue-actions { display:flex; gap:8px; justify-content:center; margin-top:10px; flex-wrap:wrap; align-items:center; }
+.rogue-actions button { background:#2a3a5e; color:#e8e8e8; border:1px solid #3a4a6e; border-radius:20px; padding:5px 18px; font-size:12px; cursor:pointer; transition:.2s; }
+.rogue-actions button:hover:not(:disabled) { background:#3a5a8e; }
+.rogue-actions button:disabled { opacity:.45; cursor:not-allowed; }
+.rogue-actions button.active { color:#f5c842; border-color:#f5c842; }
+.rogue-note { text-align:center; font-size:11px; color:#8899bb; margin:2px 0 6px; }
+
+.rogue-pick { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+.rp-card { width:98px; padding:6px 4px; border-radius:10px; border:1px solid #2a3a5e; background:#14142a; text-align:center; cursor:pointer; transition:.15s; }
+.rp-card:hover { border-color:#5dade2; transform:translateY(-2px); }
+.rp-card.selected { border-color:#f5c842; background:#2a2410; box-shadow:0 0 10px rgba(245,200,66,0.35); }
+.rp-emoji { font-size:20px; }
+.rp-name { font-size:12px; color:#e8e8e8; }
+.rp-sub { font-size:9px; color:#8899bb; line-height:1.35; margin-top:2px; }
+
+.rogue-arena { display:flex; align-items:stretch; gap:8px; }
+.rogue-side { flex:1; display:flex; flex-direction:column; gap:6px; min-width:0; }
+.rogue-vs { display:flex; align-items:center; color:#f5c842; font-size:16px; flex-shrink:0; }
+.rogue-unit { border:1px solid #2a3a5e; border-radius:8px; background:#14142a; padding:4px 7px; }
+.rogue-unit.dead { opacity:.45; border-color:#e74c3c; }
+.ru-head { font-size:12px; color:#e8e8e8; font-weight:bold; }
+.ru-bar { height:6px; background:#1a1a30; border-radius:6px; overflow:hidden; margin:3px 0 2px; }
+.ru-hp { height:100%; background:#2ecc71; border-radius:6px; transition:width .15s linear; }
+.ru-hp.low { background:#e67e22; }
+.ru-hp.critical { background:#e74c3c; }
+.ru-txt { font-size:10px; color:#8899bb; }
+.ru-eq { font-size:10px; color:#f5c842; margin-top:1px; }
+.ru-status { display:flex; gap:3px; flex-wrap:wrap; margin-top:2px; }
+/* 战斗日志: v2.2 起固定在整个战场右侧(高度随战场拉伸) */
+.rogue-log { flex:0 0 34%; width:34%; min-width:205px; margin-top:0; height:auto; overflow-y:auto; background:#0a0a18; border:1px solid #2a2a4a; border-radius:8px; padding:6px 8px; font-size:11px; line-height:1.5; color:#8899bb; font-family:'Courier New',monospace; }
+.rogue-log::-webkit-scrollbar { width:4px; }
+.rogue-log::-webkit-scrollbar-thumb { background:#2a3a5e; border-radius:10px; }
+.rogue-log .dmg-physical { color:#e74c3c; font-weight:bold; }
+.rogue-log .dmg-magic { color:#5dade2; font-weight:bold; }
+.rogue-log .dmg-true { color:#ffffff; font-weight:bold; text-shadow:0 0 6px rgba(255,255,255,0.45); }
+.rogue-log .highlight { color:#f5c842; font-weight:bold; }
+.rogue-log .heal { color:#2ecc71; }
+.rogue-log .curse { color:#9b59b6; font-weight:bold; }
+.rogue-log .armor { color:#5dade2; }
+.rogue-log .silence { color:#e67e22; font-weight:bold; }
+
+.rogue-team { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+.rt-member { width:158px; border:1px solid #2a3a5e; border-radius:10px; background:#14142a; padding:6px; }
+.rt-name { font-size:12px; color:#f5c842; text-align:center; margin-bottom:4px; }
+.rt-member select { width:100%; background:#1a1a3a; color:#e0e0e0; border:1px solid #2a3a5e; border-radius:6px; font-size:11px; padding:1px 2px; margin-bottom:3px; }
+.rogue-bag { margin-top:10px; border-top:1px solid #2a2a4a; padding-top:8px; }
+.rb-title { font-size:12px; color:#f5c842; margin-bottom:4px; text-align:center; }
+.rb-list { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+.rb-item { border:1px solid #2a3a5e; border-radius:8px; background:#141a2e; padding:2px 8px; font-size:11px; color:#b0c4de; }
+.rb-item.used-up { opacity:.45; }
+/* v2.3 商店卖装备: 背包条目右侧「卖出」按钮 */
+.rb-sell { margin-left:6px; background:#2a3a5e; color:#f5c842; border:1px solid #3a4a6e; border-radius:10px; padding:0 7px; font-size:10px; line-height:16px; cursor:pointer; }
+.rb-sell:hover:not(:disabled) { background:#3a5a8e; color:#fff; }
+.rb-sell:disabled { opacity:.35; cursor:not-allowed; }
+.rogue-toast.ok { color:#2ecc71; }
+.rb-empty { color:#5a6a88; font-size:11px; text-align:center; }
+.rogue-end { text-align:center; font-size:16px; padding:14px 0; }
+.rogue-end .re-sub { display:block; font-size:12px; color:#8899bb; margin-top:6px; }
+
+/* ============================================================
+   v2.1 覆盖: 远征窗口全屏 + 节点地图 + 整备站位格 + 商店
+   ============================================================ */
+#rogueModal .modal-content {
+    width:100vw; max-width:100vw; height:100vh; max-height:100vh;
+    border-radius:0; border:none; padding:14px 26px 18px;
+    display:flex; flex-direction:column; box-shadow:none;
+}
+#rogueModal .modal-content h2 { padding-bottom:6px; margin-bottom:10px; }
+#rogueModal .rogue-body { flex:1; min-height:0; max-height:none; }
+#rogueModal .rogue-node { cursor:default; }
+#rogueModal .rogue-node.current { transform:scale(1.04); }
+
+/* 整备: 左站位 / 右装备 */
+.rogue-prep { display:flex; gap:16px; align-items:flex-start; }
+.rogue-prep-left { width:330px; flex-shrink:0; }
+.rogue-prep-right { flex:1; min-width:0; }
+.rp-title { font-size:12px; color:#f5c842; margin-bottom:4px; text-align:center; }
+.rogue-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.rg-cell { min-height:78px; border:1px dashed #2a3a5e; border-radius:10px; background:rgba(16,16,42,0.45); padding:4px; text-align:center; cursor:pointer; transition:.15s; }
+.rg-cell:hover { border-color:#5dade2; }
+.rg-cell.filled { border-style:solid; border-color:#3a4a6e; background:#14142a; }
+.rg-cell.selected { border-color:#f5c842; box-shadow:0 0 10px rgba(245,200,66,0.4); }
+.rg-cell.drop-target { border-color:#2ecc71; background:#16261c; }
+.rg-cell.dragging { opacity:.5; }
+.rg-pos { font-size:9px; color:#5a6a88; }
+.rg-name { font-size:12px; color:#e8e8e8; font-weight:bold; margin:2px 0; }
+.rg-eq { font-size:12px; }
+.rg-empty { font-size:16px; color:#3a4a6e; margin-top:6px; }
+.rogue-foes { display:flex; flex-direction:column; gap:4px; }
+.rf-foe { font-size:11px; color:#ff9b9b; background:#1a1018; border:1px solid #4a2030; border-radius:8px; padding:2px 8px; }
+.rf-sub { color:#8899bb; font-size:10px; margin-left:4px; }
+/* 商店卡片 */
+.rp-card.sold { opacity:.4; cursor:default; }
+.rp-card.sold:hover { border-color:#2a3a5e; transform:none; }
+.rp-price { font-size:10px; color:#f5c842; margin-top:2px; }
+
+/* ============================================================
+   v2.2: 远征战斗「前后排 6 站位」+ 装备升级点 + 升级装备徽章
+   ============================================================ */
+/* 战场(上下布局): 左列 = B 队在上 / A 队在下, 右列 = 战斗日志 */
+.rogue-arena { display:flex; align-items:stretch; gap:8px; height:100%; min-height:280px; }
+.rogue-fields { flex:1; display:flex; flex-direction:column; gap:6px; min-width:0; overflow-y:auto; }
+.rof-block { border:1px solid #2a2a4a; border-radius:8px; background:#101024; padding:5px 7px; }
+.rof-head { display:flex; justify-content:space-between; align-items:baseline; font-size:11px; color:#f5c842; margin-bottom:4px; }
+.rof-head .rof-sub { font-size:9px; color:#5a6a88; }
+.rof-mid { text-align:center; font-size:10px; color:#5a6a88; letter-spacing:1px; }
+/* 单侧战场: 前排一行 + 后排一行, 每行 3 格 */
+.rogue-side { gap:6px; }
+.rf-row { display:flex; align-items:stretch; gap:4px; }
+.rf-tag { flex-shrink:0; width:24px; display:flex; align-items:center; justify-content:center; font-size:10px; color:#5a6a88; background:#101024; border:1px solid #2a2a4a; border-radius:6px; writing-mode:vertical-rl; letter-spacing:2px; }
+.rf-cells { flex:1; display:grid; grid-template-columns:repeat(3,1fr); gap:6px; min-width:0; }
+.rogue-unit { min-height:76px; }
+.rogue-unit.empty { display:flex; flex-direction:column; align-items:center; justify-content:center; border-style:dashed; opacity:.45; }
+.rogue-unit.empty .ru-head { font-size:11px; color:#5a6a88; font-weight:normal; }
+.rogue-unit.empty .ru-txt { font-size:9px; }
+.ru-pos { float:right; font-size:9px; color:#5a6a88; font-weight:normal; }
+/* 装备升级点卡片 */
+.rp-card.up-card { width:150px; border-color:#5a4a1a; background:#1a1608; }
+.rp-card.up-card:hover { border-color:#f5c842; }
+.rp-card.up-card .rp-name { color:#f5c842; font-size:11px; }
+/* 背包中的升级装备 */
+.rb-item.upgraded { border-color:#5a4a1a; background:#1a1608; color:#f5c842; }
+/* 升级装备徽章 */
+#startScreen .equip-library .rare-badge.upgrade-badge,
+#heroModal .rare-badge.upgrade-badge { background:#4a2a0a; color:#f5c842; border-color:#f5c842; }
+
+/* ============================================================
+   v2.4 新增: 入口关卡选择 / 敌方站位与对位详情 / 战斗结算 /
+             一次性物品(守护·攻击药剂) / 装备分配界面增强
+   ============================================================ */
+
+/* 入口关卡选择卡片 */
+.rp-card.entry-card { width:132px; }
+.rp-card.entry-card .rp-sub { min-height:30px; }
+
+/* 装备分配: 缩小背包, 放大队员卡片并显示实时基础信息 */
+.rogue-prep { flex-wrap:wrap; }
+.rogue-prep-left { width:360px; }
+.rogue-prep-right { flex:1; min-width:340px; }
+.rt-member { width:212px; padding:7px 8px; }
+.rt-head { display:flex; justify-content:space-between; align-items:baseline; gap:6px; margin-bottom:4px; }
+.rt-head .rt-name { text-align:left; margin-bottom:0; font-size:12.5px; }
+.rt-slot { font-size:10px; color:#8899bb; flex-shrink:0; }
+.rt-stats { display:flex; flex-wrap:wrap; gap:2px 8px; font-size:10.5px; color:#9fd4ff; background:#101024; border:1px solid #1f2740; border-radius:6px; padding:3px 6px; margin-bottom:4px; }
+.rt-stats span { white-space:nowrap; }
+.rt-equips { display:flex; flex-direction:column; gap:3px; }
+.rt-eq-lines { margin-top:4px; border-top:1px dashed #2a3a5e; padding-top:3px; }
+.rt-eq-line { font-size:9.5px; color:#b0c4de; line-height:1.4; }
+.rt-eq-line b { color:#f5c842; }
+.rogue-bag { max-height:104px; overflow-y:auto; }
+.rogue-bag::-webkit-scrollbar { width:4px; }
+.rogue-bag::-webkit-scrollbar-thumb { background:#2a3a5e; border-radius:10px; }
+.rb-item { padding:1px 7px; font-size:10.5px; }
+
+/* 一次性物品面板(整备界面勾选) */
+.rogue-items { margin-top:8px; border:1px solid #2a3a5e; border-radius:8px; background:#101024; padding:6px 8px; }
+.ri-title { font-size:11px; color:#f5c842; margin-bottom:4px; }
+.ri-item { display:flex; align-items:flex-start; gap:8px; padding:4px 6px; border:1px solid #22304a; border-radius:8px; background:#141a2e; cursor:pointer; margin-bottom:4px; }
+.ri-item.on { border-color:#2ecc71; background:#12261a; }
+.ri-item input { margin-top:3px; flex-shrink:0; cursor:pointer; }
+.ri-icon { font-size:16px; }
+.ri-body { display:flex; flex-direction:column; font-size:11px; color:#e8e8e8; }
+.ri-own { color:#8899bb; font-size:10px; }
+.ri-desc { color:#8899bb; font-size:10px; }
+
+/* 敌方站位网格 + 我方对位详情 */
+.rogue-grid.enemy-grid { margin-top:4px; }
+.rg-cell.enemy { cursor:default; min-height:auto; border-style:solid; border-color:#4a2030; background:#150f18; }
+.rg-cell.enemy:hover { border-color:#4a2030; }
+.rg-cell.enemy.filled .rg-name { color:#ff9b9b; }
+.rg-stat { font-size:9px; color:#8899bb; line-height:1.5; white-space:nowrap; }
+.rogue-pairs { display:flex; flex-direction:column; gap:4px; }
+.rp-pair { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; font-size:10.5px; background:#141a2e; border:1px solid #22304a; border-radius:8px; padding:4px 8px; }
+.rp-us { color:#9fd4ff; }
+.rp-arrow { color:#f5c842; flex-shrink:0; }
+.rp-foe { color:#ff9b9b; }
+.rp-foe.none { color:#5a6a88; }
+.rp-foe .rp-stat { display:block; color:#8899bb; }
+.rp-foe-eq { display:block; font-size:9.5px; color:#8899bb; }
+.rp-stat { font-size:9.5px; color:#8899bb; margin-left:6px; }
+
+/* 战斗结算界面 */
+.rogue-settle { text-align:center; padding:24px 10px; }
+.rogue-settle .rs-title { font-size:26px; font-weight:bold; margin-bottom:10px; }
+.rogue-settle.win .rs-title { color:#f5c842; text-shadow:0 0 18px rgba(245,200,66,0.5); }
+.rogue-settle.lose .rs-title { color:#e74c3c; }
+.rogue-settle .rs-dmg { font-size:16px; color:#e8e8e8; margin-bottom:8px; }
+.rogue-settle .rs-dmg b { color:#5dade2; font-size:22px; }
+.rogue-settle .rs-sub { font-size:12px; color:#8899bb; }
+
+/* 商店一次性物品卡片 */
+.rp-card.item-card { border-color:#2a4a3a; background:#0f1a16; }
+.rp-card.item-card:hover { border-color:#2ecc71; }
+
+/* 远征入口: 内容(难度滚轮 + 状态行)靠左下角排; 说明文字与「关卡路线」列表已移除
+   仅入口阶段生效(.rogue-body 加 entry-mode), 其余阶段(整备/商店/战斗等)不受影响 */
+.rogue-body.entry-mode { display:flex; flex-direction:column; justify-content:flex-end; justify-content: safe flex-end; align-items:flex-start; }
+.rogue-body.entry-mode .rogue-lock { margin:0; }
+.rogue-body.entry-mode .rpl-meta { justify-content:flex-start; text-align:left; }
+
+/* 顶栏与节点地图按阶段显隐(由 renderRogue 切换 .hidden):
+   顶栏: 仅「选难度」入口界面隐藏, 出征选人起出现
+   地图: 出征选人界面还不显示, 进整备/战斗后才出现; 「远征结束」界面也不显示 */
+.rogue-top.hidden, .rogue-map.hidden { display:none; }
+
+/* ============================================================
+   v2.8 新增: 远征难度选择(密码锁式滚轮) + 顶栏常驻难度
+   ============================================================ */
+
+/* 顶栏常驻显示本局难度 */
+.rogue-diff { color:#9fd4ff; font-size:15px; }
+
+/* 密码锁: 中间格 = 当前选中档位(可滚动/拖拽/点击/键盘, 滚到底为最高档) */
+.rogue-lock { position:relative; width:262px; margin:8px auto 0; }
+.rp-lock {
+    position:relative; height:168px; overflow-y:auto; overscroll-behavior:contain;
+    scrollbar-width:none; -ms-overflow-style:none; cursor:grab; user-select:none; outline:none;
+    background:linear-gradient(180deg, rgba(10,10,26,0.94), rgba(30,38,64,0.55) 50%, rgba(10,10,26,0.94));
+    border:1px solid #22304a; border-radius:14px;
+}
+.rp-lock::-webkit-scrollbar { width:0; height:0; }
+.rp-lock.dragging { cursor:grabbing; }
+.rpl-pad { height:56px; }
+.rp-lock-item {
+    height:56px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    color:#6b7c99; opacity:.5; transform:scale(.88); cursor:pointer;
+    transition:transform .18s ease, opacity .18s ease, color .18s ease;
+}
+.rp-lock-item .rpl-name { font-size:15px; }
+.rp-lock-item .rpl-status { font-size:10.5px; letter-spacing:1px; color:#5a6a88; }
+.rp-lock-item.active { opacity:1; transform:scale(1.06); }
+.rp-lock-item.active .rpl-name { color:#f5c842; font-size:20px; font-weight:bold; }
+.rp-lock-item.active .rpl-status { color:#9fb0cc; }
+.rp-lock-item.cleared .rpl-status { color:#2ecc71; }
+.rp-lock-item.cleared.active .rpl-name { color:#2ecc71; }
+.rp-lock-item.locked .rpl-name { color:#4d5875; }
+.rp-lock-item.locked.active .rpl-name { color:#8899bb; }
+.rpl-band {
+    position:absolute; left:-8px; right:-8px; top:56px; height:56px; pointer-events:none; border-radius:10px;
+    border-top:1px solid #3a4a6e; border-bottom:1px solid #3a4a6e;
+    background:rgba(93,173,226,0.07); box-shadow:0 0 16px rgba(93,173,226,0.12);
+}
+.rpl-meta { display:flex; justify-content:center; gap:8px 18px; flex-wrap:wrap; margin-top:10px; font-size:12px; color:#8899bb; text-align:center; }
+.rpl-meta b { color:#f5c842; }

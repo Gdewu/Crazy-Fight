@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>狂暴对战（v2.8）</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 启动界面 -->
+<div id="startScreen">
+    <div class="header">
+        <h1>⚔️ 狂暴对战 ⚔️</h1>
+    </div>
+    <button class="start-btn" id="startBtn">⚡ 进入战斗</button>
+    <div class="version"><span class="v-num">v2.8 更新日志</span>🗺️远征难度 5 档(远征1~5，表尾可继续扩展) · 🎡密码锁式难度滚轮(滚轮逐档/拖拽/点击/键盘，滚到底为最高档) · 🏅击败 BOSS 完整通关解锁下一档(进度存本机，刷新不丢)</div>
+    <div class="btn-group">
+        <button id="rogueOpenBtn" class="rogue-entry-btn">🗺️ 远征挑战</button>
+        <button id="toggleEquipBtn">📦 装备大全</button>
+        <button id="showRulesBtn">📜 全局规则</button>
+        <button id="heroOpenBtn">📖 人物介绍</button>
+    </div>
+    <div class="equip-library" id="startEquipLibrary">
+        <h3>📦 装备大全</h3>
+        <div id="startEquipList">
+            <div class="rule-section">
+                <div class="rule-head" data-toggle="startEquipList_normal">
+                    <span class="rule-title">🟢 普通装备（占 1 装备点）</span><span class="rule-arrow">▼</span>
+                </div>
+                <div class="collapse-body" id="startEquipList_normal"></div>
+            </div>
+            <div class="rule-section">
+                <div class="rule-head" data-toggle="startEquipList_special">
+                    <span class="rule-title">✨ 特殊装备（不消耗装备点）</span><span class="rule-arrow">▼</span>
+                </div>
+                <div class="collapse-body" id="startEquipList_special"></div>
+            </div>
+            <div class="rule-section">
+                <div class="rule-head" data-toggle="startEquipList_rare">
+                    <span class="rule-title">⭐ 稀有装备（占 2 装备点）</span><span class="rule-arrow">▼</span>
+                </div>
+                <div class="collapse-body" id="startEquipList_rare"></div>
+            </div>
+            <div class="rule-section">
+                <div class="rule-head" data-toggle="startEquipList_upgrade">
+                    <span class="rule-title">🔧 升级装备（占 1 装备点；普通对战可直接选用）</span><span class="rule-arrow">▼</span>
+                </div>
+                <div class="collapse-body" id="startEquipList_upgrade"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 全局规则模态框 -->
+<div id="rulesModal">
+    <div class="modal-content">
+        <h2>📜 全局规则</h2>
+
+        <div class="rule-section">
+            <div class="rule-head" data-toggle="rulePlay">
+                <span class="rule-title">🎮 游戏玩法</span><span class="rule-arrow">▼</span>
+            </div>
+            <ul class="rule-body" id="rulePlay">
+                <li><strong>队伍规模：</strong>每队 1~3 人，两队人数可不同（1v1 … 3v3），全场最多 6 名角色。</li>
+                <li><strong>阵型站位：</strong>每队一个 <strong>3 列 × 2 行</strong> 的矩形区域，共 6 个站位格（前排 3 格 + 后排 3 格）。每队最多 3 人，可在 6 格中<strong>自由摆放</strong>：点击空格「＋」放置队员，<strong>拖动面板</strong>可换位或交换，面板右上「✕」移除队员。靠中间一侧为前排。</li>
+                <li><strong>对位优先承伤：</strong>默认攻击<strong>与自己同一列（对位）</strong>的敌人：该列<strong>前排存活就打前排</strong>，<strong>对位前排阵亡后，由同列的后排接替</strong>；只有该列已无可选目标时，才顺延到<strong>列距离最近</strong>的敌人（距离相同取更靠左一列）。部分单位有独立选敌规则：刺客优先敌方后排，Boss 随机选取，枪手锁定血量最低者。</li>
+                <li><strong>对位攻击：</strong>在可攻击的候选目标中，优先选择与自己<strong>同列</strong>的敌人；同列无目标时，按列距离由近及远顺延。全程确定性，无随机。</li>
+                <li><strong>团灭判负：</strong>一方全部队员阵亡才判负，单人阵亡后战斗继续；技能同样按上述规则选取目标。</li>
+                <li><strong>编队保存：</strong>调整好人物与装备后，可在「💾 编队」中命名保存，之后一键调用。</li>
+            </ul>
+        </div>
+
+        <div class="rule-section">
+            <div class="rule-head" data-toggle="ruleMech">
+                <span class="rule-title">⚙️ 游戏机制</span><span class="rule-arrow">▼</span>
+            </div>
+            <ul class="rule-body" id="ruleMech">
+                <li><strong>装备容量：</strong>每名角色共 <strong>2 个装备点</strong>；<strong>普通装备</strong>占 1 点、<strong>特殊装备</strong>不消耗装备点、<strong>稀有装备</strong>占 2 点。装备栏共 3 个槽位。相同装备不再受限，可重复装备。</li>
+                <li><strong>装备限制：</strong>专业法杖 / 灵能大法杖仅蓝条英雄可装备；熊王爪要求英雄<strong>基础生命值 ≥ 1700</strong>（不含装备加成）。</li>
+                <li><strong>唯一被动：</strong>魔返（释放技能回复法力）／血赋（生命值转攻击力）／御击（攻击附带双抗伤害）——同名唯一被动重复装备<strong>只生效一次</strong>，不叠加。</li>
+                <li><strong>覆盖机制：</strong>血赋与御击在结算链<strong>最后一步</strong>计算，可吃到其他装备与技能带来的生命/双抗加成；其余装备效果只作用于本体。</li>
+                <li><strong>🔧 升级装备（占 1 装备点）：</strong>流星锤→碎岩流星锤、急速弓→霜天风暴弓、精钢剑→幸运精钢剑、专业法杖→灵能大法杖、吸血镰刀→嗜血狂镰。远征「装备升级点」花 <strong>10 金币</strong>可升级获得；普通对局的装备栏与「装备大全」也可直接选用。<strong>每人只能携带 1 件升级装备</strong>（装备下拉会把其余升级装备置灰）。</li>
+                <li><strong>🩸 嗜血狂镰（吸血镰刀升级）：</strong>攻击力 +20、全能吸血 +15%、攻速 +0.2（固定）；被动·嗜血：每攻击一次额外 +0.5% 全能吸血，最多额外 +15%。</li>
+                <li><strong>❄️ 寒冰印记（霜天风暴弓）：</strong>被攻击者叠加印记，带印记者<strong>攻速 -10%</strong>（不管多少层）；叠至 <strong>10 层</strong>时目标被<strong>冻结 1.5 秒</strong>并清空印记。</li>
+                <li><strong>回蓝模板（蓝条英雄）：</strong>a模板＝自然回蓝1/秒＋普攻命中回蓝1/次；b模板＝自然回蓝1/秒＋受击回蓝1/次。</li>
+                <li><strong>SP（技能强度）：</strong>由装备提供，放大英雄自身固定数值的技能伤害与技能回复；以攻击力倍率计算的机制与装备型附加伤害不享受。</li>
+                <li><strong>眩晕 💫：</strong>被眩晕者无法普攻与施法，但回蓝、CD 照常运转，已释放技能（如诅咒）不中断。</li>
+                <li><strong>⏳ 施法时间（法师 · 法术爆发）：</strong>满 16 蓝后需 <strong>0.5 秒</strong>吟唱才结算 280 法伤；吟唱途中被眩晕会中断，<strong>蓝量保留</strong>并在解除眩晕后重新吟唱。</li>
+                <li><strong>重伤（诅咒 🧙）：</strong>巫师诅咒附着于目标身上，期间目标<strong>一切回复减半</strong>；可叠加刷新，可同时维持多个目标，施法者死亡或被控也不中断。对 <strong>BOSS 单位</strong>：生命上限按 min(最大生命, 5000) 折算，单次（每秒）3% 的伤害不超过 150。</li>
+                <li><strong>战斗日志配色：</strong>物理伤害为<strong style="color:#e74c3c;">红色</strong>、魔法伤害为<strong style="color:#5dade2;">蓝色</strong>、真实伤害为<strong style="color:#ffffff;">白色加粗</strong>。</li>
+            </ul>
+        </div>
+
+        <button class="modal-close" id="rulesCloseBtn">关闭</button>
+    </div>
+</div>
+
+<!-- 人物介绍模态框(替代原「模拟统计」) -->
+<div id="heroModal">
+    <div class="modal-content hero-content">
+        <h2>📖 人物介绍</h2>
+        <div class="rule-section">
+            <div class="rule-head" data-toggle="heroListBody">
+                <span class="rule-title">👤 英雄</span><span class="rule-arrow">▼</span>
+            </div>
+            <div class="collapse-body" id="heroListBody"><div class="hero-cards" id="heroCards"></div></div>
+        </div>
+        <div class="rule-section">
+            <div class="rule-head" data-toggle="bossListBody">
+                <span class="rule-title">🏆 BOSS</span><span class="rule-arrow">▼</span>
+            </div>
+            <div class="collapse-body" id="bossListBody"><div class="hero-cards" id="bossCards"></div></div>
+        </div>
+        <button class="modal-close" id="heroCloseBtn">关闭</button>
+    </div>
+</div>
+
+<!-- 挑战模式(固定编队,调用到 B 队) -->
+<div id="challengeModal">
+    <div class="modal-content hero-content">
+        <h2>🎯 挑战队伍</h2>
+        <div class="challenge-list" id="challengeList"></div>
+        <button class="modal-close" id="challengeCloseBtn">关闭</button>
+    </div>
+</div>
+
+<!-- 远征挑战(肉鸽模式 2.4): 全屏; 只能操作 A 队;
+    出征→战斗→战斗→商店→装备升级→精英战→BOSS 共 7 个节点按顺序推进;
+    v2.8: 入口为「密码锁式难度滚轮」(远征1~5, 可扩展), 通关(击败BOSS)解锁下一档并存本地;
+          顶栏 #rogueDiff 显示本局难度(入口「选难度」界面整条顶栏与节点地图隐藏, 地图自整备/战斗起显示);
+    战斗界面为上下布局(B 队在上 / A 队在下, 双方各 3列×2行 前后排 6 站位), 战斗日志在右侧,
+    并可「⚙ 调整装备/站位」暂停回整备; 商店可卖装备(普通 6 金 / 稀有 12 金 / 升级装备 10 金) -->
+<div id="rogueModal">
+    <div class="modal-content">
+        <h2>🗺️ 远征挑战</h2>
+        <div class="rogue-top" id="rogueTop">
+            <div class="rogue-status">
+                <span class="rogue-diff" id="rogueDiff"></span>
+                <span class="rogue-lives" id="rogueLives"></span>
+                <span class="rogue-gold" id="rogueGold"></span>
+            </div>
+            <div class="rogue-map" id="rogueMap"></div>
+        </div>
+        <div class="rogue-phase" id="roguePhase"></div>
+        <div class="rogue-toast" id="rogueToast"></div>
+        <div class="rogue-body" id="rogueBody"></div>
+        <div class="rogue-actions" id="rogueActions"></div>
+        <button class="modal-close" id="rogueCloseBtn">关闭</button>
+    </div>
+</div>
+
+<!-- 游戏主容器 -->
+<div class="container" id="mainContainer" style="display:none;">
+    <button class="back-btn" id="backBtn">🔙 返回</button>
+    <h1>⚔️ 狂暴对战 ⚔️</h1>
+    <div class="main-layout">
+        <div class="left-area">
+            <div class="arena">
+                <!-- A队(3列×2行阵型: 前排靠中间) -->
+                <div class="team" id="teamA" data-count="1">
+                    <div class="team-header">
+                        <span class="team-name">🛡️ A队</span>
+                        <span class="team-count" id="teamHeadA">1 / 3 人</span>
+                    </div>
+                    <div class="team-grid" id="teamPanelsA"></div>
+                    <button class="add-slot" id="addBtnA">＋ 快捷添加</button>
+                </div>
+                <div class="vs">⚡</div>
+                <!-- B队(镜像: 前排同样靠中间) -->
+                <div class="team" id="teamB" data-count="1">
+                    <div class="team-header">
+                        <span class="team-name">⚔️ B队</span>
+                        <span class="team-count" id="teamHeadB">1 / 3 人</span>
+                    </div>
+                    <div class="team-grid" id="teamPanelsB"></div>
+                    <button class="add-slot" id="addBtnB">＋ 快捷添加</button>
+                    <button class="add-slot challenge-btn" id="challengeOpenBtn">🎯 挑战队伍</button>
+                </div>
+            </div>
+            <div class="controls">
+                <button class="btn-fight" id="btnFight">⚡ 攻击一次</button>
+                <button class="btn-auto" id="btnAuto">▶ 自动战斗</button>
+                <button class="btn-reset" id="btnReset">🔄 重置</button>
+                <span class="speed-group" id="speedGroup">
+                    <button class="speed-btn active" id="speed1x">1x</button>
+                    <button class="speed-btn" id="speed2x">2x</button>
+                    <button class="speed-btn" id="speed4x">4x</button>
+                </span>
+            </div>
+            <div class="winner-banner" id="winnerBanner">🏆 胜利！</div>
+            <div class="footer"><span id="roundInfo">回合: 0</span></div>
+        </div>
+        <div class="right-area">
+            <div class="title">📜 战斗记录</div>
+            <div class="log" id="log"><div>💬 编队并选择装备，开始战斗</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- 装备详情浮窗 -->
+<div class="equip-tooltip" id="equipTooltip">
+    <div class="tt-name" id="ttName">装备名</div>
+    <div class="tt-desc" id="ttDesc">描述</div>
+    <ul class="tt-stats" id="ttStats"></ul>
+</div>
+
+<script src="config.js"></script>
+<script src="heroes.js"></script>
+<script src="equips.js"></script>
+<script src="mechanics.js"></script>
+<script src="engine.js"></script>
+<!-- 远征挑战(肉鸽模式)UI: 须在 game.js 之前加载(game.js 末尾立即执行 init(),其中要调用 GameRogue) -->
+<script src="rogue.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
