@@ -616,10 +616,14 @@ const PANEL_HTML = `
         <div class="hero-current"></div>
         <div class="hero-grid"></div>
     </div>
-    <div class="name"></div>
-    <div class="emoji"></div>
-    <div class="stat">HR <span class="hp-val"></span> <span class="label">攻击</span> <span class="atk-val"></span> <span class="label">攻速</span> <span class="spd-val"></span></div>
-    <div class="stat"><span class="label">暴击率</span> <span class="crit-val"></span>% <span class="armor-tag">AR <span class="armor-val"></span>%</span><span class="armor-tag">MR <span class="mr-val"></span>%</span></div>
+    <div class="stats">
+        <span class="stat-item"><span class="label">攻击</span><span class="atk-val"></span></span>
+        <span class="stat-item"><span class="label">攻速</span><span class="spd-val"></span></span>
+        <span class="stat-item"><span class="label">AR</span><span class="armor-val"></span>%</span>
+        <span class="stat-item"><span class="label">MR</span><span class="mr-val"></span>%</span>
+        <span class="stat-item"><span class="label">暴击</span><span class="crit-val"></span>%</span>
+        <span class="stat-item"><span class="label">吸血</span><span class="leech-val"></span>%</span>
+    </div>
     <div class="equip-tags">
         <span class="equip-tag eq-tag-0">无</span>
         <span class="equip-tag eq-tag-1">无</span>
@@ -705,14 +709,12 @@ function buildPanel(teamKey, cell) {
         removeBtn: panel.querySelector('.remove-slot'),
         heroCurrent: panel.querySelector('.hero-current'),
         heroGrid: panel.querySelector('.hero-grid'),
-        name: panel.querySelector('.name'),
-        emoji: panel.querySelector('.emoji'),
-        hpVal: panel.querySelector('.hp-val'),
         atkVal: panel.querySelector('.atk-val'),
         spdVal: panel.querySelector('.spd-val'),
         critVal: panel.querySelector('.crit-val'),
         armorVal: panel.querySelector('.armor-val'),
         mrVal: panel.querySelector('.mr-val'),
+        leechVal: panel.querySelector('.leech-val'),
         eqTag0: panel.querySelector('.eq-tag-0'),
         eqTag1: panel.querySelector('.eq-tag-1'),
         eqTag2: panel.querySelector('.eq-tag-2'),
@@ -961,7 +963,8 @@ function updateBars() {
             const u = team[i];
             const refs = getRefs(teamKey, u.cell);
             if (!refs) continue;
-            refs.hpVal.textContent = round1(u.hp);
+            // 属性区不再显示血量数值(仅保留下方血条 + 数值); 吸血(全能吸血%)为实时值
+            refs.leechVal.textContent = round1(u.leechAll || 0);
             refs.hpText.textContent = `${round1(u.hp)} / ${round1(u.maxHp)}`;
             const p = clamp((u.hp / u.maxHp) * 100, 0, 100);
             refs.hpBar.style.width = p + '%';
@@ -1035,8 +1038,6 @@ function refreshStaticPanels() {
             const u = team[i];
             const refs = getRefs(teamKey, u.cell);
             if (!refs) continue;
-            refs.name.textContent = u.name;
-            refs.emoji.textContent = u.emoji;
             refs.atkVal.textContent = round1(u.atk);
             // v2.7: 机制加成生效时高亮显示当前攻击力(动态数值)
             refs.atkVal.className = unitAtkBuffActive(u) ? 'atk-val buffed' : 'atk-val';
