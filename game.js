@@ -274,8 +274,8 @@ const ttStats = $('ttStats');
 //  每名队员带 cell 站位格(0..5): 0..2 = 前排 1/2/3 列,3..5 = 后排 1/2/3 列
 const DEFAULT_HERO = { A: 'warrior', B: 'knight' };
 let roster = {
-    A: [{ heroId: 'warrior', equipIds: ['none', 'none', 'none'], cell: 1 }],
-    B: [{ heroId: 'knight', equipIds: ['none', 'none', 'none'], cell: 1 }]
+    A: [{ heroId: 'warrior', equipIds: ['none', 'none', 'none'], cell: 1, talentIds: [] }],
+    B: [{ heroId: 'knight', equipIds: ['none', 'none', 'none'], cell: 1, talentIds: [] }]
 };
 
 let world;                      // 当前对局
@@ -441,7 +441,7 @@ function addMember(teamKey, cell) {
     }
     if (!isValidCell(cell) || memberAt(teamKey, cell)) cell = firstFreeCell(teamKey);
     if (cell === null) return;
-    roster[teamKey].push({ heroId: DEFAULT_HERO[teamKey], equipIds: ['none', 'none', 'none'], cell });
+    roster[teamKey].push({ heroId: DEFAULT_HERO[teamKey], equipIds: ['none', 'none', 'none'], cell, talentIds: [] });
     rebuildAll();
     addLogUI(`➕ ${teamKey}队 ${HERO_DEFS[DEFAULT_HERO[teamKey]].name} 入驻 ${cellName(cell)}`);
 }
@@ -476,8 +476,10 @@ function moveMember(teamKey, fromCell, toCell) {
 function updateMemberHero(teamKey, cell, heroId, equipIds) {
     const m = memberAt(teamKey, cell);
     if (!m) return;
+    const prevHero = m.heroId;
     m.heroId = heroId;
     m.equipIds = equipIds.slice();
+    if (prevHero !== heroId) m.talentIds = [];
     rebuildAll();
     const u = unitAt(teamKey, cell);
     addLogUI(`🔄 ${teamKey}队${cellName(cell)}：${u ? u.emoji + ' ' + u.name : HERO_DEFS[heroId].name} 已上场`);
@@ -492,12 +494,114 @@ function updateMemberEquip(teamKey, cell, equipIds) {
     const e2 = EQUIP_DEFS[equipIds[2]] || EQUIP_DEFS.none;
     addLogUI(`🔄 ${teamKey}队${cellName(cell)} 装备：${e0.icon}${e0.name} ${e1.icon}${e1.name} ${e2.icon}${e2.name}`);
 }
+// v2.9 天赋写入 roster(规则校验在 normalizeTalentIds)
+function updateMemberTalent(teamKey, cell, talentIds) {
+    const m = memberAt(teamKey, cell);
+    if (!m) return;
+    m.talentIds = normalizeTalentIds(talentIds, m.heroId);
+    rebuildAll();
+    const names = m.talentIds.map(id => {
+        const t = TALENT_DEFS[id];
+        return t ? `${t.icon}${t.name}` : id;
+    });
+    addLogUI(m.talentIds.length
+        ? `✨ ${teamKey}队${cellName(cell)} 天赋：${names.join(' ')}`
+        : `✨ ${teamKey}队${cellName(cell)} 已清空天赋`);
+}
 
 // 装备组合合法性(v4.3): 仅校验装备点容量;相同装备(含法力护符)不再受限
 // v2.7: 新增「每人只能携带 1 件升级装备」的校验
 function isValidEquipCombo(equipIds) {
     if (equipUpgradeCount(equipIds) > 1) return false;
     return equipPointsUsed(equipIds) <= CONFIG.equip.points;
+}
+
+// ============================================================
+//  天赋弹窗(v2.9): 独立模态框;A/B 两侧共用
+// ============================================================
+let talentModalCtx = null;   // { teamKey, cell }
+function talentTierStyle(tier) {
+    const t = TALENT_TIERS.find(x => x.key === tier);
+    return t ? t.color : '#8e9aaf';
+}
+function openTalentModal(teamKey, cell) {
+    const m = memberAt(teamKey, cell);
+    const modal = $('talentModal');
+    if (!m || !modal) return;
+    talentModalCtx = { teamKey, cell };
+    renderTalentModal();
+    modal.style.display = 'flex';
+}
+function closeTalentModal() {
+    const modal = $('talentModal');
+    if (modal) modal.style.display = 'none';
+    talentModalCtx = null;
+}
+function renderTalentModal() {
+    const body = $('talentModalBody');
+    const title = $('talentModalTitle');
+    if (!body || !talentModalCtx) return;
+    const { teamKey, cell } = talentModalCtx;
+    const m = memberAt(teamKey, cell);
+    if (!m) return;
+    const hero = HERO_DEFS[m.heroId];
+    const selected = normalizeTalentIds(m.talentIds || [], m.heroId);
+    m.talentIds = selected;
+    title.textContent = `${hero.emoji} ${hero.name} · 天赋（${selected.length}/${CONFIG.talent.maxSlots}）`;
+    const pool = talentsOfHero(m.heroId);
+    if (!pool.length) {
+        body.innerHTML = `<div class="talent-empty">该英雄天赋开发中</div>`;
+        return;
+    }
+    body.innerHTML = pool.map(t => {
+        const on = selected.indexOf(t.id) >= 0;
+        const color = talentTierStyle(t.tier);
+        const tierName = (TALENT_TIERS.find(x => x.key === t.tier) || {}).name || t.tier;
+        return `<div class="talent-card${on ? ' selected' : ''}" data-id="${t.id}" style="border-color:${color}">
+            <div class="talent-head">
+                <span class="talent-name" style="color:${color}">${t.icon} ${t.name}</span>
+                <span class="talent-tier" style="color:${color}">${tierName}</span>
+            </div>
+            <div class="talent-desc">${t.desc}</div>
+        </div>`;
+    }).join('');
+    body.querySelectorAll('.talent-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const id = card.dataset.id;
+            const def = TALENT_DEFS[id];
+            if (!def) return;
+            const cur = normalizeTalentIds(m.talentIds || [], m.heroId);
+            const idx = cur.indexOf(id);
+            if (idx >= 0) {
+                cur.splice(idx, 1);
+            } else {
+                if (cur.length >= CONFIG.talent.maxSlots) {
+                    addLogUI(`⚠️ 天赋最多 ${CONFIG.talent.maxSlots} 个，请先取消一个`);
+                    return;
+                }
+                if (def.tier === 'legendary') {
+                    const legCount = cur.filter(x => TALENT_DEFS[x] && TALENT_DEFS[x].tier === 'legendary').length;
+                    if (legCount >= CONFIG.talent.maxLegendary) {
+                        addLogUI(`⚠️ 传说天赋最多 ${CONFIG.talent.maxLegendary} 个`);
+                        return;
+                    }
+                }
+                cur.push(id);
+            }
+            updateMemberTalent(teamKey, cell, cur);
+            renderTalentModal();
+        });
+    });
+}
+function talentTagsHtml(talentIds, heroId) {
+    const ids = Array.isArray(talentIds) ? talentIds : [];
+    if (!ids.length) return `<span class="talent-tag empty" data-act="open-talent">✨ 天赋</span>`;
+    return ids.map(id => {
+        const t = TALENT_DEFS[id];
+        if (!t) return '';
+        const color = talentTierStyle(t.tier);
+        return `<span class="talent-tag" style="border-color:${color};color:${color}" title="${t.desc}" data-act="open-talent">${t.icon}${t.name}</span>`;
+    }).join('');
 }
 
 // ============================================================
@@ -520,6 +624,10 @@ const PANEL_HTML = `
         <span class="equip-tag eq-tag-0">无</span>
         <span class="equip-tag eq-tag-1">无</span>
         <span class="equip-tag eq-tag-2">无</span>
+    </div>
+    <div class="talent-row">
+        <button class="talent-open-btn" type="button">✨ 天赋</button>
+        <div class="talent-tags"></div>
     </div>
     <div class="hp-bar-bg"><div class="hp-bar" style="width:100%"></div></div>
     <div class="hp-text"></div>
@@ -608,6 +716,8 @@ function buildPanel(teamKey, cell) {
         eqTag0: panel.querySelector('.eq-tag-0'),
         eqTag1: panel.querySelector('.eq-tag-1'),
         eqTag2: panel.querySelector('.eq-tag-2'),
+        talentOpenBtn: panel.querySelector('.talent-open-btn'),
+        talentTags: panel.querySelector('.talent-tags'),
         equipPoints: panel.querySelector('.equip-points'),
         hpBar: panel.querySelector('.hp-bar'),
         hpText: panel.querySelector('.hp-text'),
@@ -625,9 +735,13 @@ function buildPanel(teamKey, cell) {
     };
     refs.slotBadge.textContent = cellName(cell);
 
-    // 事件: 展开英雄网格 / 移除队员
+    // 事件: 展开英雄网格 / 移除队员 / 天赋弹窗
     refs.heroCurrent.addEventListener('click', () => toggleHeroGrid(teamKey, cell));
     refs.removeBtn.addEventListener('click', () => removeMember(teamKey, cell));
+    if (refs.talentOpenBtn) refs.talentOpenBtn.addEventListener('click', () => openTalentModal(teamKey, cell));
+    if (refs.talentTags) refs.talentTags.addEventListener('click', (e) => {
+        if (e.target.closest('[data-act="open-talent"]')) openTalentModal(teamKey, cell);
+    });
 
     // 拖动换位: 在下拉/按钮上按下时不触发拖动,避免影响选择操作
     panel.addEventListener('mousedown', (e) => {
@@ -944,6 +1058,10 @@ function refreshStaticPanels() {
             if (refs.equipPoints) {
                 refs.equipPoints.textContent = `装备点 ${equipPointsUsed(u.equipIds)} / ${CONFIG.equip.points}`;
             }
+            if (refs.talentTags) {
+                const m = memberAt(teamKey, u.cell);
+                refs.talentTags.innerHTML = talentTagsHtml(m ? m.talentIds : (u.talentIds || []), u.heroId);
+            }
         }
     });
 }
@@ -1028,6 +1146,7 @@ function startAuto() {
     const fresh = createWorld(roster.A, roster.B, { maxPerTeam: freshCap });
     if (aliveCount(fresh, 'A') === 0 || aliveCount(fresh, 'B') === 0) return;
     world = fresh;
+    applyTalentOnStart(world);   // v2.9 原初之力
     logArrayRef = null; logShownCount = 0;
     world.uiDirty = true;
     isAuto = true;
@@ -1114,6 +1233,7 @@ function rebuildAll() {
     stopAuto();
     buildWorld();
     resetCombatState(world);
+    applyTalentOnStart(world);   // v2.9 原初之力: 重置清场后再开局星落
     renderArena();
     refreshPanels();
     applyResetUI();
@@ -1277,7 +1397,13 @@ function applyChallengeTeam(index, side) {
     const t = CHALLENGE_TEAMS[index];
     if (!t) return;
     const key = (side === 'A') ? 'A' : 'B';
-    roster[key] = t.members.map(m => ({ heroId: m.heroId, equipIds: m.equipIds.slice(), cell: m.cell, freeEquip: true }));
+    roster[key] = t.members.map(m => ({
+        heroId: m.heroId,
+        equipIds: m.equipIds.slice(),
+        cell: m.cell,
+        freeEquip: true,
+        talentIds: normalizeTalentIds(m.talentIds || [], m.heroId)
+    }));
     rebuildAll();
     addLogUI(`🎯 ${key}队 已载入挑战队伍「${t.name}」（${t.members.length} 人）`);
     const modal = $('challengeModal');
@@ -1320,6 +1446,8 @@ function renderChallengeList() {
 // ============================================================
 function init() {
     buildWorld();
+    resetCombatState(world);
+    applyTalentOnStart(world);
     renderArena();
     refreshPanels();
     applyResetUI();
@@ -1353,6 +1481,15 @@ function init() {
     });
     $('heroCloseBtn').addEventListener('click', () => { heroModal.style.display = 'none'; });
     heroModal.addEventListener('click', (e) => { if (e.target === heroModal) heroModal.style.display = 'none'; });
+
+    // ---- 天赋弹窗 ----
+    const talentModal = $('talentModal');
+    if (talentModal) {
+        $('talentCloseBtn').addEventListener('click', () => { talentModal.style.display = 'none'; talentModalCtx = null; });
+        talentModal.addEventListener('click', (e) => {
+            if (e.target === talentModal) { talentModal.style.display = 'none'; talentModalCtx = null; }
+        });
+    }
 
     // ---- 挑战模式(固定编队,调用到 B 队) ----
     const challengeModal = $('challengeModal');

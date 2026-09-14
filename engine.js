@@ -2,7 +2,7 @@
 //  ③ 引擎层(由 game.js 拆分,内容逐行一致,行为零变化)
 //    - 纯逻辑: 世界/单位构建, 战斗推进 tick, 伤害结算, 目标选择, 工具函数
 //    - 不触碰 DOM;Node 下可直接 require('./engine.js') 用于对拍/模拟
-//    - 依赖数据文件: config.js → heroes.js → equips.js → mechanics.js
+//    - 依赖数据文件: config.js → heroes.js → equips.js → talents.js → mechanics.js
 // ============================================================
 'use strict';
 
@@ -11,7 +11,7 @@
 //  Node(require) 中: 每个文件是独立模块作用域,外移的数据对 game.js 不可见,
 //  故在此把数据模块的属性挂到 globalThis,使 require('./game.js') 与原单文件行为一致。
 if (typeof module !== 'undefined' && module.exports) {
-    ['./config.js', './heroes.js', './equips.js', './mechanics.js'].forEach(function (rel) {
+    ['./config.js', './heroes.js', './equips.js', './talents.js', './mechanics.js'].forEach(function (rel) {
         const mod = require(rel);
         Object.keys(mod).forEach(function (k) { globalThis[k] = mod[k]; });
     });
@@ -46,19 +46,30 @@ function starfallPulse(unit, world, cfg) {
     for (let i = 0; i < enemies.length; i++) if (isAlive(enemies[i])) alive.push(enemies[i]);
     if (!alive.length) return;
     const t = alive[Math.floor(world.rng() * alive.length) % alive.length];
-    const dmg = Math.max(0.1, round1(unit.atk * cfg.adRatio * (1 - getDefense(t, 'magical') / 100)));
+    const adRatio = (typeof unit.starfallAdRatio === 'number') ? unit.starfallAdRatio : cfg.adRatio;
+    const dmgMult = 1 - getDefense(t, 'magical') / 100;
+    let dmg = Math.max(0.1, round1(unit.atk * adRatio * dmgMult));
+    // v2.9 星陨: 星落可暴击,暴伤吃 critMulti
+    let crit = false;
+    if (unit.starfallCanCrit) {
+        if (world.rng() < (unit.critRate || 0) / 100) {
+            crit = true;
+            dmg = round1(dmg * (unit.critMulti || 2.0));
+            unit.stats.crits++;
+        }
+    }
     // v2.7: 同一次技能的事件标记 —— 若伤害被黑暗护盾抵消, 附带的眩晕也由同一层护盾抵消
     const ev = newShieldEvent();
     applyDamageTo(world, t, dmg, unit, { skill: true, event: ev });
     unit.stats.dmgDealt += dmg;
-    let msg = `🌠 星落命中 ${t.name}：${dmgSpan(dmg, 'magical')} 魔法伤害`;
+    let msg = `🌠 星落命中 ${t.name}：${dmgSpan(dmg, 'magical')}${crit ? ' 暴击' : ''} 魔法伤害`;
     if (!t.starfallHitFlag) {
         t.starfallHitFlag = true;
         if (!applyStunTo(world, t, cfg.stunSec, { label: '星落眩晕', event: ev })) {
             msg += `，首次命中额外眩晕 ${cfg.stunSec}s`;
         }
     }
-    world.addLog(msg, '');
+    world.addLog(msg, crit ? 'highlight' : '');
     if (t.hp <= 0) handleDeath(world, t, unit);
 }
 // ---- v2.5 辅助: 取敌方「攻击力最高」的存活单位(猎网用; 攻击力相同时取站位靠前者) ----
@@ -509,9 +520,40 @@ function applyEquips(unit, equipIds) {
     unit.hp = unit.maxHp;
 }
 
-// ---- 构建单位(英雄模板 + 装备数值 + 机制实例 + 战斗态初始化) ----
+// ---- v2.9 天赋: 在装备结算之后写入 unit 覆盖值(攻速/暴击加算; 星落参数 unit 级覆盖) ----
+function applyTalents(unit, talentIds) {
+    unit.talentIds = normalizeTalentIds(talentIds, unit.heroId);
+    unit.starfallAdRatio = null;
+    unit.starfallMaxCharge = null;
+    unit.starfallCanCrit = false;
+    unit.starfallOnStart = false;
+    if (!unit.talentIds.length) return;
+    let speedFlat = 0, critRate = 0;
+    unit.talentIds.forEach(id => {
+        const def = TALENT_DEFS[id];
+        if (!def || !def.effects) return;
+        def.effects.forEach(ef => {
+            if (!ef) return;
+            if (ef.type === 'speedFlat') speedFlat += (ef.value || 0);
+            else if (ef.type === 'critRate') critRate += (ef.value || 0);
+            else if (ef.type === 'starfallAdRatio') unit.starfallAdRatio = ef.value;
+            else if (ef.type === 'starfallMaxCharge') unit.starfallMaxCharge = ef.value;
+            else if (ef.type === 'starfallCanCrit') unit.starfallCanCrit = true;
+            else if (ef.type === 'starfallOnStart') unit.starfallOnStart = true;
+        });
+    });
+    if (speedFlat && unit.heroId !== 'gunner') {
+        unit.speed = round2(unit.speed + speedFlat);
+    } else if (speedFlat && unit.heroId === 'gunner') {
+        // 枪手锁攻速: 与装备一致,按 0.05 → +1 攻击力折算
+        unit.atk = round1(unit.atk + Math.round(speedFlat / 0.05));
+    }
+    if (critRate) unit.critRate = round1((unit.critRate || 0) + critRate);
+}
+
+// ---- 构建单位(英雄模板 + 装备数值 + 天赋 + 机制实例 + 战斗态初始化) ----
 //  teamKey: 所属队伍 'A'/'B';cell: 阵型站位格 0..5(0..2 = 前排 1/2/3 列,3..5 = 后排 1/2/3 列)
-function makeUnit(heroId, equipIds, teamKey, cell, world, freeEquip) {
+function makeUnit(heroId, equipIds, teamKey, cell, world, freeEquip, talentIds) {
     const def = HERO_DEFS[heroId];
     const unit = JSON.parse(JSON.stringify(def));
     unit.heroId = heroId;
@@ -530,6 +572,7 @@ function makeUnit(heroId, equipIds, teamKey, cell, world, freeEquip) {
     });
     unit.mechanics = mechs;
     applyEquips(unit, unit.equipIds);
+    applyTalents(unit, talentIds);
     // 战斗态
     unit.hp = unit.maxHp;
     unit.shield = 0;
@@ -565,6 +608,12 @@ function makeUnit(heroId, equipIds, teamKey, cell, world, freeEquip) {
     unit.starfallTimer = 0;      // v2.5 魔剑士 · 星落剩余时间
     unit.starfallAccum = 0;
     unit.starfallHitFlag = false;// v2.5 首次被星落命中的眩晕标记(挂在被命中方)
+    // v2.9 天赋覆盖(由 applyTalents 写入; 此处兜底)
+    if (unit.talentIds === undefined) unit.talentIds = [];
+    if (unit.starfallAdRatio === undefined) unit.starfallAdRatio = null;
+    if (unit.starfallMaxCharge === undefined) unit.starfallMaxCharge = null;
+    if (unit.starfallCanCrit === undefined) unit.starfallCanCrit = false;
+    if (unit.starfallOnStart === undefined) unit.starfallOnStart = false;
     unit.lancerCasting = false;  // v2.5 长枪手 · 三连突刺蓄力中
     unit.lancerCastTimer = 0;
     unit.ghostImmuneTimer = 0;   // v2.5 BOSS幽魂 · 复活免疫剩余时间
@@ -630,7 +679,8 @@ function toTeamConfig(team, limit) {
             heroId: (m && m.heroId) || 'warrior',
             equipIds: (m && m.equipIds) ? m.equipIds.slice() : ['none', 'none', 'none'],
             cell: (m && isValidCell(m.cell) && !used[m.cell]) ? m.cell : null,
-            freeEquip: !!(m && m.freeEquip)   // 挑战模式预设: 不受装备点限制
+            freeEquip: !!(m && m.freeEquip),   // 挑战模式预设: 不受装备点限制
+            talentIds: normalizeTalentIds((m && m.talentIds) || [], (m && m.heroId) || 'warrior')
         };
         if (member.cell === null) {
             // 未指定或格子冲突 → 按默认顺序(前中→前左→前右→后中→后左→后右)自动布阵
@@ -676,8 +726,8 @@ function createWorld(teamA, eqA, teamB, eqB, opts) {
         fullLog: o.fullLog || null,         // 可选: 不截断的完整日志(测试/对拍用)
         mode: o.mode || 'versus'            // 'versus' 普通对战 / 'rogue' 远征模式(引擎按模式开关掉落等玩法逻辑)
     };
-    ta.forEach(m => { world.A.push(makeUnit(m.heroId, m.equipIds, 'A', m.cell, world, m.freeEquip)); });
-    tb.forEach(m => { world.B.push(makeUnit(m.heroId, m.equipIds, 'B', m.cell, world, m.freeEquip)); });
+    ta.forEach(m => { world.A.push(makeUnit(m.heroId, m.equipIds, 'A', m.cell, world, m.freeEquip, m.talentIds)); });
+    tb.forEach(m => { world.B.push(makeUnit(m.heroId, m.equipIds, 'B', m.cell, world, m.freeEquip, m.talentIds)); });
     // 出手顺序: A 队整体先于 B 队(与原版一致),队内按阵型格顺序(前排→后排,左→右)
     world.units = world.A.concat(world.B);
     // v4.6: 同队同名编号(如 战士1/战士2);跨队同名由日志颜色(A蓝/B红)区分
@@ -695,6 +745,21 @@ function createWorld(teamA, eqA, teamB, eqB, opts) {
     // 机制钩子通过 world.addLog 写入日志(引擎层保持无 DOM)
     world.addLog = (msg, cls) => { addLog(world, msg, cls); };
     return world;
+}
+// v2.9 原初之力: 开局直接进入星落期(须在世界就绪、且不会被 resetCombatState 清掉之后调用)
+function applyTalentOnStart(world) {
+    if (!world || !world.units) return;
+    world.units.forEach(u => {
+        if (world.winner) return;
+        if (!u.starfallOnStart || u.hp <= 0 || !hasMech(u, 'starfall')) return;
+        if (u.starfallTimer > 0) return;
+        const cfg = CONFIG.starfall;
+        u.magicCharge = 0;
+        u.starfallTimer = cfg.durationSec;
+        u.starfallAccum = 0;
+        world.addLog(`🌌 ${u.name} 的「原初之力」苏醒，开局直接进入星落！`, 'highlight');
+        starfallPulse(u, world, cfg);
+    });
 }
 function addLog(world, msg, cls) {
     const time = world.battleTime.toFixed(1);
@@ -1314,6 +1379,7 @@ function simulateBattle(teamA, eqA, teamB, eqB, opts) {
         const o = (teamB && typeof teamB === 'object' && !Array.isArray(teamB)) ? teamB : (opts || {});
         world = createWorld(teamA, eqA, { rng: o.rng, maxPerTeam: o.maxPerTeam });
     }
+    applyTalentOnStart(world);   // v2.9 原初之力(与 UI/远征开战路径一致)
     while (world.winner === null && world.battleTime < CONFIG.sim.timeout) {
         tick(world, CONFIG.auto.step, {});
     }
@@ -1335,7 +1401,8 @@ const Engine = {
     createWorld, tick, performAttack, simulateBattle, mulberry32, normalizeEquipIds, applyHealReduction,
     addLog, applyDamageTo, handleDeath, makeUnit, equipCost, equipPointsUsed, equipTierOf, equipListOfTier,
     dmgSpan, hitKind,
-    pickTarget, checkTeamWipe, enemyTeamKey, aliveCount, teamStats
+    pickTarget, checkTeamWipe, enemyTeamKey, aliveCount, teamStats,
+    applyTalents, applyTalentOnStart, normalizeTalentIds
 };
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -1352,7 +1419,7 @@ if (typeof module !== 'undefined' && module.exports) {
         enemyTeamKey, isAlive, pickTarget, pickStrongestEnemy, spOf, handleDeath, makeUnit, recalcSpeedMul,
         addIronStack, applyCurseTick, applyEvo, applyManaRefund, castArcStorm, castLancerTripleStrike,
         castMageBurst, lancerAlone, updateLancerAlone, newShieldEvent, notifySkillCast, performGhostAttack,
-        starfallPulse, unitManaStep, tick, ROGUE_POTION, RARE_EQUIPS
+        starfallPulse, unitManaStep, tick, ROGUE_POTION, RARE_EQUIPS, applyTalents, normalizeTalentIds, applyTalentOnStart
     });
     // reflectGuard 是可变的 let,必须以 getter 暴露,否则机制钩子只能读到加载时的快照 0
     Object.defineProperty(globalThis, 'reflectGuard', { get: () => reflectGuard, configurable: true });

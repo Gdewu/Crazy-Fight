@@ -1,5 +1,5 @@
 // 数据层 · 配置常量(由 game.js 拆分,内容逐行一致,行为零变化)
-// 加载顺序: config.js → heroes.js → equips.js → mechanics.js → game.js
+// 加载顺序: config.js → heroes.js → equips.js → talents.js → mechanics.js → engine.js → …
 
 // ============================================================
 //  ① 配置常量(魔法数字集中抽取,行为零变化)
@@ -71,7 +71,15 @@ const CONFIG = {
     bloodScythe: { leechPerHit: 0.5, maxGain: 15 },
     frostMark: { maxStacks: 10, speedDownPct: 0.10, freezeSec: 1.5 },   // 霜天风暴弓: 寒冰印记(-10%攻速 / 10层冻结1.5s)
     psionicStaff: { spPerCast: 10, maxSp: 100 },       // 灵能大法杖: 每次释放蓝技能 SP+10(最多+100)
-    maxAttackTime: 0
+    maxAttackTime: 0,
+    // v2.9 天赋系统: 每单位最多 3 个本命天赋;传说至多 1 个;远征胜利/商店刷取
+    talent: {
+        maxSlots: 3,
+        maxLegendary: 1,
+        rogueWinChoices: 3,
+        rogueShopCount: 3,
+        rogueShopCost: 40
+    }
 };
 
 // ---- Node 兼容导出(浏览器中为全局 const, 仅 require 场景需要导出) ----

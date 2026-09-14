@@ -72,7 +72,7 @@ const ROGUE_NODES = [
     { type: 'pick',    icon: '🧭', name: '出征',     desc: '5选2英雄 · 4选1基础装备' },
     { type: 'battle',  icon: '⚔️', name: '战斗',     desc: '2 名随机英雄' },
     { type: 'battle',  icon: '⚔️', name: '战斗',     desc: '3 名随机英雄（带恢复水晶）' },
-    { type: 'shop',    icon: '🏪', name: '商店',     desc: '买10/20金 · 卖6/12金' },
+    { type: 'shop',    icon: '🏪', name: '商店',     desc: '装备/药剂/天赋' },
     { type: 'upgrade', icon: '🔧', name: '装备升级', desc: '10金升级装备（无战斗，可直接通过）' },
     { type: 'elite',   icon: '🔥', name: '精英战',   desc: '原队伍1（吸血）' },
     { type: 'boss',    icon: '👑', name: 'BOSS',     desc: '大魔法师' }
@@ -98,6 +98,9 @@ const ROGUE = {
     settle: null,         // v2.4 战斗结算数据({win, dmg})
     difficulty: 1,        // v2.8 本局远征难度(档位号)
     maxCleared: 0,        // v2.8 本地存档: 已通关的最高档位(0 = 尚未通关任何档位)
+    talentRewards: [],    // v2.9 胜利结算天赋 3 选 1
+    pickTalent: null,     // v2.9 当前选中的奖励/商店天赋 id
+    talentReplaceFor: null, // v2.9 满槽时待替换的新天赋 id
     result: null
 };
 let rogueWorld = null, rogueTimer = null, rogueLogRef = null, rogueLogShown = 0, rogueSpeed = 2;
@@ -221,6 +224,7 @@ function rogueReset() {
     ROGUE.poolHeroes = []; ROGUE.poolEquips = []; ROGUE.pickHeroes = []; ROGUE.pickEquips = [];
     ROGUE.result = null;
     ROGUE.items = {}; ROGUE.potionUse = {}; ROGUE.settle = null;
+    ROGUE.talentRewards = []; ROGUE.pickTalent = null; ROGUE.talentReplaceFor = null;
     rogueMoveFrom = null;
     rogueWorld = null; rogueLogRef = null; rogueLogShown = 0;
 }
@@ -239,7 +243,9 @@ function rogueEnterNode() {
             basics: rogueSample(equipListOfTier('normal'), ROGUE_SHOP.basicCount)
                 .map(id => ({ id, price: ROGUE_SHOP.basicPrice, sold: false })),
             rares: rogueSample(equipListOfTier('rare'), ROGUE_SHOP.rareCount)
-                .map(id => ({ id, price: ROGUE_SHOP.rarePrice, sold: false }))
+                .map(id => ({ id, price: ROGUE_SHOP.rarePrice, sold: false })),
+            talents: rogueRollTalentChoices(CONFIG.talent.rogueShopCount)
+                .map(id => ({ id, price: CONFIG.talent.rogueShopCost, sold: false }))
         };
     } else if (node.type === 'upgrade') {
         ROGUE.phase = 'upgrade';                             // ⑥ 装备升级点
@@ -250,7 +256,7 @@ function rogueEnterNode() {
     }
 }
 function rogueConfirmHeroSelect() {
-    ROGUE.team = ROGUE.pickHeroes.map((id, i) => ({ heroId: id, equipIds: ['none', 'none', 'none'], cell: ROGUE_SLOT_CELLS[i] }));
+    ROGUE.team = ROGUE.pickHeroes.map((id, i) => ({ heroId: id, equipIds: ['none', 'none', 'none'], cell: ROGUE_SLOT_CELLS[i], talentIds: [] }));
     ROGUE.bag = {};
     ROGUE.pickEquips.forEach(id => rogueAddToBag(id));
     rogueAdvance();
@@ -289,12 +295,17 @@ function rogueBuildEnemies(nodeIdx) {
 // 开战: 每关重新构建世界 → 全队回满血(站位使用玩家在整备界面摆放的格子)
 function rogueStartBattle() {
     rogueStopTimer();
-    const a = ROGUE.team.map(m => ({ heroId: m.heroId, equipIds: m.equipIds.slice(), cell: m.cell, freeEquip: false }));
+    const a = ROGUE.team.map(m => ({
+        heroId: m.heroId, equipIds: m.equipIds.slice(), cell: m.cell, freeEquip: false,
+        talentIds: normalizeTalentIds(m.talentIds || [], m.heroId)
+    }));
     const b = ROGUE.enemies.map(m => ({
         heroId: m.heroId, equipIds: m.equipIds.slice(),
-        cell: (typeof m.cell === 'number' ? m.cell : ROGUE_SLOT_CELLS[0]), freeEquip: true
+        cell: (typeof m.cell === 'number' ? m.cell : ROGUE_SLOT_CELLS[0]), freeEquip: true,
+        talentIds: normalizeTalentIds(m.talentIds || [], m.heroId)
     }));
     rogueWorld = createWorld(a, b, { maxPerTeam: 9, mode: 'rogue' });
+    applyTalentOnStart(rogueWorld);   // v2.9 原初之力
     rogueLogRef = null; rogueLogShown = 0;
     // v2.4 一次性物品: 整备界面勾选「本场使用」→ 开战自动生效并消耗 1 个
     const usedItems = [];
@@ -369,16 +380,12 @@ function rogueSettleConfirm() {
         ROGUE.gold += ROGUE_GOLD_PER_BATTLE;                 // 战斗节点胜利 +10 金币
         if (ROGUE.node >= ROGUE_NODES.length - 1) {
             rogueFinishWin();                            // 击败 BOSS → 通关并解锁下一档
-        } else if (ROGUE.node === 1) {
-            ROGUE.phase = 'rewardEquip';                     // ② 基础装备 4 选 1
-            ROGUE.poolEquips = rogueSample(equipListOfTier('normal'), 4);
-            ROGUE.pickEquips = [];
-        } else if (ROGUE.node === 2) {
-            ROGUE.phase = 'rewardRare';                      // ③ 稀有装备 3 选 1 + 1 个恢复水晶
-            ROGUE.poolEquips = rogueSample(equipListOfTier('rare'), 3);
-            ROGUE.pickEquips = [];
         } else {
-            rogueAdvance();
+            // v2.9 胜利结算先刷天赋 3 选 1(可跳过), 再进入原装备奖励/推进
+            ROGUE.talentRewards = rogueRollTalentChoices(CONFIG.talent.rogueWinChoices);
+            ROGUE.pickTalent = null;
+            ROGUE.talentReplaceFor = null;
+            ROGUE.phase = 'rewardTalent';
         }
     } else {
         ROGUE.lives -= 1;
@@ -386,6 +393,70 @@ function rogueSettleConfirm() {
         else ROGUE.phase = 'defeat';
     }
     renderRogue();
+}
+// 天赋奖励结算后: 走原本的节点奖励分支
+function rogueAfterTalentReward() {
+    ROGUE.talentRewards = []; ROGUE.pickTalent = null; ROGUE.talentReplaceFor = null;
+    if (ROGUE.node === 1) {
+        ROGUE.phase = 'rewardEquip';
+        ROGUE.poolEquips = rogueSample(equipListOfTier('normal'), 4);
+        ROGUE.pickEquips = [];
+    } else if (ROGUE.node === 2) {
+        ROGUE.phase = 'rewardRare';
+        ROGUE.poolEquips = rogueSample(equipListOfTier('rare'), 3);
+        ROGUE.pickEquips = [];
+    } else {
+        rogueAdvance();
+    }
+    renderRogue();
+}
+// ---- v2.9 天赋池/装上 ----
+function rogueTalentPoolIds() {
+    const pool = [];
+    (ROGUE.team || []).forEach(m => {
+        const owned = normalizeTalentIds(m.talentIds || [], m.heroId);
+        const hasLeg = owned.some(id => TALENT_DEFS[id] && TALENT_DEFS[id].tier === 'legendary');
+        talentsOfHero(m.heroId).forEach(t => {
+            if (owned.indexOf(t.id) >= 0) return;
+            if (t.tier === 'legendary' && hasLeg) return;
+            pool.push(t.id);
+        });
+    });
+    return pool;
+}
+function rogueRollTalentChoices(n) {
+    const count = n || CONFIG.talent.rogueWinChoices;
+    return rogueSample(rogueTalentPoolIds(), count);
+}
+function rogueTalentCardHtml(id, cls, attrs, priceText) {
+    const t = TALENT_DEFS[id];
+    if (!t) return '';
+    const hero = HERO_DEFS[t.heroId] || {};
+    const tier = TALENT_TIERS.find(x => x.key === t.tier) || { name: t.tier };
+    const price = priceText ? `<div class="rp-price">${priceText}</div>` : '';
+    return `<div class="rp-card talent-card-rp ${cls || ''}" ${attrs || ''} style="border-color:${tier.color || '#8e9aaf'}">
+        <div class="rp-emoji">${t.icon}</div>
+        <div class="rp-name" style="color:${tier.color || '#b0c4de'}">${t.name}</div>
+        <div class="rp-sub">${tier.name} · ${hero.emoji || ''}${hero.name || ''}</div>
+        <div class="rp-sub">${t.desc}</div>${price}</div>`;
+}
+// 尝试装上; 满槽返回 'full', 非法返回 false, 成功 true
+function rogueTryApplyTalent(talentId) {
+    const def = TALENT_DEFS[talentId];
+    if (!def) return false;
+    const m = (ROGUE.team || []).filter(x => x.heroId === def.heroId)[0];
+    if (!m) return false;
+    const cur = normalizeTalentIds(m.talentIds || [], m.heroId);
+    if (cur.indexOf(talentId) >= 0) return false;
+    if (cur.length >= CONFIG.talent.maxSlots) return 'full';
+    cur.push(talentId);
+    m.talentIds = normalizeTalentIds(cur, m.heroId);
+    return true;
+}
+function rogueRemoveTalent(heroId, talentId) {
+    const m = (ROGUE.team || []).filter(x => x.heroId === heroId)[0];
+    if (!m) return;
+    m.talentIds = normalizeTalentIds((m.talentIds || []).filter(id => id !== talentId), m.heroId);
 }
 
 // ---- 渲染 ----
@@ -443,6 +514,7 @@ function renderRogue() {
         case 'prep': renderRoguePrep(phaseEl, body, actions); break;
         case 'battle': renderRogueBattleView(phaseEl, body, actions); break;
         case 'settle': renderRogueSettle(phaseEl, body, actions); break;
+        case 'rewardTalent': renderRogueRewardTalent(phaseEl, body, actions); break;
         case 'rewardEquip': renderRogueRewardEquip(phaseEl, body, actions); break;
         case 'rewardRare': renderRogueRewardRare(phaseEl, body, actions); break;
         case 'recruit': renderRogueRecruit(phaseEl, body, actions); break;
@@ -690,20 +762,24 @@ function rogueBagHtml(sellMode) {
 function rogueTeamOrder() {
     return ROGUE.team.slice().sort((a, b) => ROGUE_SLOT_CELLS.indexOf(a.cell) - ROGUE_SLOT_CELLS.indexOf(b.cell));
 }
-// v2.4: 单位实时数值预览(英雄 + 装备), 用于整备界面的基础信息显示
-function rogueUnitPreview(heroId, equipIds, cell, teamKey, freeEquip) {
+// v2.4: 单位实时数值预览(英雄 + 装备 + 天赋), 用于整备界面的基础信息显示
+function rogueUnitPreview(heroId, equipIds, cell, teamKey, freeEquip, talentIds) {
     const h = HERO_DEFS[heroId];
-    const u = makeUnit(heroId, equipIds, teamKey, cell, null, !!freeEquip);
+    const u = makeUnit(heroId, equipIds, teamKey, cell, null, !!freeEquip, talentIds || []);
     return {
         emoji: h.emoji, name: h.name, hasMana: h.hasMana,
         maxHp: round1(u.maxHp), atk: round1(u.atk),
         speed: (u.speed * (u.speedMul || 1)).toFixed(2),
         armor: round1(u.armor), mr: round1(u.mr), maxMana: u.maxMana,
-        eq: (equipIds || []).filter(id => id !== 'none').map(id => (EQUIP_DEFS[id] ? EQUIP_DEFS[id].icon : '')).join('')
+        eq: (equipIds || []).filter(id => id !== 'none').map(id => (EQUIP_DEFS[id] ? EQUIP_DEFS[id].icon : '')).join(''),
+        talents: (u.talentIds || []).map(id => {
+            const t = TALENT_DEFS[id];
+            return t ? t.icon : '';
+        }).join('')
     };
 }
-function rogueMemberStats(m) { return rogueUnitPreview(m.heroId, m.equipIds, m.cell, 'A', false); }
-function rogueFoeStats(m) { return rogueUnitPreview(m.heroId, m.equipIds, m.cell, 'B', true); }
+function rogueMemberStats(m) { return rogueUnitPreview(m.heroId, m.equipIds, m.cell, 'A', false, m.talentIds); }
+function rogueFoeStats(m) { return rogueUnitPreview(m.heroId, m.equipIds, m.cell, 'B', true, m.talentIds); }
 function rogueFoeStatLine(s) {
     return `<span class="rp-stat">❤️ ${s.maxHp}　⚔️ ${s.atk}　⚡ ${s.speed}　🛡️ ${s.armor}　🔮 ${s.mr}</span>`;
 }
@@ -821,11 +897,12 @@ function renderRoguePrep(phaseEl, body, actions) {
         const selCls = (rogueMoveFrom === cell) ? ' selected' : '';
         if (m) {
             const h = HERO_DEFS[m.heroId];
+            const st = rogueMemberStats(m);
             const eq = m.equipIds.filter(id => id !== 'none').map(id => (EQUIP_DEFS[id] ? EQUIP_DEFS[id].icon : '')).join('');
             html += `<div class="rg-cell filled${selCls}" data-cell="${cell}" draggable="true">
                 <div class="rg-pos">${cellName(cell)} · ${slot}号位</div>
                 <div class="rg-name">${h.emoji} ${h.name}</div>
-                <div class="rg-eq">${eq || '—'}</div></div>`;
+                <div class="rg-eq">${eq || '—'}${st.talents || ''}</div></div>`;
         } else {
             html += `<div class="rg-cell${selCls}" data-cell="${cell}">
                 <div class="rg-pos">${cellName(cell)} · ${slot}号位</div>
@@ -850,6 +927,13 @@ function renderRoguePrep(phaseEl, body, actions) {
             if (!e) return '';
             return `<div class="rt-eq-line">${e.icon} <b>${e.name}</b>：${(e.statsText || []).slice(0, 2).join('；')}</div>`;
         }).join('');
+        const talentIds = normalizeTalentIds(m.talentIds || [], m.heroId);
+        m.talentIds = talentIds;
+        const talentLines = talentIds.map(id => {
+            const t = TALENT_DEFS[id];
+            if (!t) return '';
+            return `<div class="rt-talent-line" data-hero="${m.heroId}" data-talent="${id}" title="点击卸下">${t.icon} <b>${t.name}</b>：${t.desc}　✕</div>`;
+        }).join('');
         html += `<div class="rt-member">
             <div class="rt-head"><span class="rt-name">${h.emoji} ${h.name}</span><span class="rt-slot">${slot}号位</span></div>
             <div class="rt-stats">
@@ -857,8 +941,9 @@ function renderRoguePrep(phaseEl, body, actions) {
                 <span>🛡️ 护甲 ${st.armor}</span><span>🔮 魔抗 ${st.mr}</span>${st.hasMana ? `<span>💧 蓝量 ${st.maxMana}</span>` : ''}
             </div>
             <div class="rt-equips">${selects}</div>
-            <div class="ru-txt" style="text-align:center">装备点 ${equipPointsUsed(m.equipIds)} / ${CONFIG.equip.points}</div>
+            <div class="ru-txt" style="text-align:center">装备点 ${equipPointsUsed(m.equipIds)} / ${CONFIG.equip.points}　·　天赋 ${talentIds.length}/${CONFIG.talent.maxSlots}</div>
             ${eqLines ? `<div class="rt-eq-lines">${eqLines}</div>` : ''}
+            ${talentLines ? `<div class="rt-talent-lines">${talentLines}</div>` : `<div class="rb-empty" style="text-align:left;padding:2px 0">暂无天赋（胜利结算或商店获得）</div>`}
         </div>`;
     });
     html += `</div>${rogueItemsPanelHtml()}${rogueBagHtml()}</div></div>`;
@@ -905,6 +990,14 @@ function renderRoguePrep(phaseEl, body, actions) {
         cb.addEventListener('change', () => {
             const id = cb.dataset.item;
             if (cb.checked) ROGUE.potionUse[id] = true; else delete ROGUE.potionUse[id];
+            renderRogue();
+        });
+    });
+    // v2.9 整备界面点击卸下天赋
+    body.querySelectorAll('.rt-talent-line[data-talent]').forEach(el => {
+        el.addEventListener('click', () => {
+            rogueRemoveTalent(el.dataset.hero, el.dataset.talent);
+            rogueToast('已卸下天赋');
             renderRogue();
         });
     });
@@ -1034,6 +1127,87 @@ function rogueEquipCardHtml(id, extraCls, extraAttrs, tail) {
         ${tail ? `<div class="rp-price">${tail}</div>` : ''}</div>`;
 }
 // ④ 战斗②奖励: 基础装备 4 选 1 → 英雄 2 选 1
+// v2.9 战斗胜利: 天赋 3 选 1(可跳过);满槽时进入替换确认
+function renderRogueRewardTalent(phaseEl, body, actions) {
+    phaseEl.textContent = '✨ 战斗胜利 · 选择 1 个天赋（3 选 1，可跳过）';
+    let html = `<div class="rogue-note">金币 💰 ${ROGUE.gold}　当前队伍：${rogueTeamNames()}　·　每人最多 ${CONFIG.talent.maxSlots} 个天赋，传说至多 ${CONFIG.talent.maxLegendary} 个</div>`;
+    if (!ROGUE.talentRewards.length) {
+        html += `<div class="rb-empty">暂无可获得的天赋（池子已空或已满传说限制）</div>`;
+    } else {
+        html += `<div class="rogue-pick">`;
+        html += ROGUE.talentRewards.map(id => rogueTalentCardHtml(id,
+            ROGUE.pickTalent === id ? ' selected' : '', `data-talent="${id}"`)).join('');
+        html += `</div>`;
+    }
+    // 满槽替换: 列出目标英雄已有天赋, 点击即替换
+    if (ROGUE.talentReplaceFor && TALENT_DEFS[ROGUE.talentReplaceFor]) {
+        const def = TALENT_DEFS[ROGUE.talentReplaceFor];
+        const m = ROGUE.team.filter(x => x.heroId === def.heroId)[0];
+        const owned = m ? normalizeTalentIds(m.talentIds || [], m.heroId) : [];
+        html += `<div class="rp-title" style="margin-top:10px">请选择要被替换的天赋（${HERO_DEFS[def.heroId].name}）</div><div class="rogue-pick">`;
+        html += owned.map(id => rogueTalentCardHtml(id, '', `data-replace="${id}"`, '点击替换')).join('');
+        html += `</div>`;
+    }
+    html += rogueTeamTalentsHtml();
+    body.innerHTML = html;
+    body.querySelectorAll('.rp-card[data-talent]').forEach(card => {
+        card.addEventListener('click', () => {
+            ROGUE.pickTalent = card.dataset.talent;
+            ROGUE.talentReplaceFor = null;
+            renderRogue();
+        });
+    });
+    body.querySelectorAll('.rp-card[data-replace]').forEach(card => {
+        card.addEventListener('click', () => {
+            const newId = ROGUE.talentReplaceFor;
+            const oldId = card.dataset.replace;
+            if (!newId) return;
+            const def = TALENT_DEFS[newId];
+            const m = ROGUE.team.filter(x => x.heroId === def.heroId)[0];
+            if (!m) return;
+            m.talentIds = normalizeTalentIds(
+                (m.talentIds || []).filter(id => id !== oldId).concat([newId]),
+                m.heroId
+            );
+            rogueToast(`✨ ${TALENT_DEFS[newId].name} 已替换 ${TALENT_DEFS[oldId].name}`);
+            rogueAfterTalentReward();
+        });
+    });
+    const skip = rogueBtn('跳过', () => rogueAfterTalentReward());
+    actions.appendChild(skip);
+    const ok = rogueBtn('确定选择', () => {
+        if (!ROGUE.pickTalent) { rogueToast('请选择 1 个天赋，或点「跳过」'); return; }
+        const r = rogueTryApplyTalent(ROGUE.pickTalent);
+        if (r === 'full') {
+            ROGUE.talentReplaceFor = ROGUE.pickTalent;
+            renderRogue();
+            return;
+        }
+        if (r === false) { rogueToast('无法装上该天赋'); return; }
+        rogueToast(`✨ 获得天赋：${TALENT_DEFS[ROGUE.pickTalent].name}`);
+        rogueAfterTalentReward();
+    });
+    ok.disabled = !ROGUE.pickTalent;
+    actions.appendChild(ok);
+}
+function rogueTeamTalentsHtml() {
+    const order = rogueTeamOrder();
+    if (!order.length) return '';
+    let html = `<div class="rp-title" style="margin-top:10px">✨ 队伍天赋</div><div class="rogue-note" style="text-align:left">`;
+    html += order.map(m => {
+        const ids = normalizeTalentIds(m.talentIds || [], m.heroId);
+        const h = HERO_DEFS[m.heroId];
+        const txt = ids.length
+            ? ids.map(id => {
+                const t = TALENT_DEFS[id];
+                return t ? `${t.icon}${t.name}` : id;
+            }).join('、')
+            : '无';
+        return `${h.emoji}${h.name}：${txt}（${ids.length}/${CONFIG.talent.maxSlots}）`;
+    }).join('<br>');
+    return html + `</div>`;
+}
+// ② 战斗胜利奖励: 基础装备 4 选 1
 function renderRogueRewardEquip(phaseEl, body, actions) {
     phaseEl.textContent = '⚔️ 战斗胜利！+10 金币 · 选择 1 件基础装备（4 选 1）';
     let html = `<div class="rogue-note">金币 💰 ${ROGUE.gold}　当前队伍：${rogueTeamNames()}</div><div class="rogue-pick">`;
@@ -1088,7 +1262,7 @@ function renderRogueRecruit(phaseEl, body, actions) {
         if (ROGUE.pickHeroes.length !== 1) { rogueToast('请选择 1 名英雄加入'); return; }
         const cell = rogueFreeCell();
         if (cell === null) { rogueToast('没有空余站位'); return; }
-        ROGUE.team.push({ heroId: ROGUE.pickHeroes[0], equipIds: ['none', 'none', 'none'], cell });
+        ROGUE.team.push({ heroId: ROGUE.pickHeroes[0], equipIds: ['none', 'none', 'none'], cell, talentIds: [] });
         ROGUE.pickHeroes = [];
         rogueAdvance();
         renderRogue();
@@ -1209,6 +1383,15 @@ function renderRogueShop(phaseEl, body, actions) {
     html += shop.rares.map((it, i) => rogueEquipCardHtml(it.id,
         it.sold ? ' sold' : '', `data-shop="rare" data-idx="${i}"`, it.sold ? '已售出' : '💰 ' + it.price)).join('');
     html += `</div>`;
+    // v2.9 天赋商店
+    html += `<div class="rp-title" style="margin-top:10px">✨ 天赋（${CONFIG.talent.rogueShopCost} 金）</div><div class="rogue-pick">`;
+    if (!(shop.talents || []).length) {
+        html += `<div class="rb-empty">暂无可购买天赋</div>`;
+    } else {
+        html += shop.talents.map((it, i) => rogueTalentCardHtml(it.id,
+            it.sold ? ' sold' : '', `data-shop="talent" data-idx="${i}"`, it.sold ? '已售出' : '💰 ' + it.price)).join('');
+    }
+    html += `</div>`;
     // v2.4: 一次性物品(守护药剂 / 攻击药剂) —— 战斗前在整备界面勾选使用
     html += `<div class="rp-title" style="margin-top:10px">🧪 一次性物品（${ROGUE_SHOP.itemPrice} 金 · 整备界面勾选，开战自动生效并消耗）</div><div class="rogue-pick">`;
     html += ROGUE_SHOP.items.map(id => {
@@ -1224,9 +1407,22 @@ function renderRogueShop(phaseEl, body, actions) {
     body.querySelectorAll('.rp-card[data-shop]').forEach(card => {
         card.addEventListener('click', () => {
             const kind = card.dataset.shop, idx = parseInt(card.dataset.idx, 10);
-            const it = (kind === 'basic' ? shop.basics : shop.rares)[idx];
+            const it = (kind === 'basic' ? shop.basics : kind === 'rare' ? shop.rares : (shop.talents || []))[idx];
             if (!it || it.sold) return;
             if (ROGUE.gold < it.price) { rogueToast('金币不足'); return; }
+            if (kind === 'talent') {
+                const r = rogueTryApplyTalent(it.id);
+                if (r === 'full') {
+                    rogueToast('该英雄天赋已满，请先在整备界面卸下一个');
+                    return;
+                }
+                if (r === false) { rogueToast('无法装上该天赋'); return; }
+                ROGUE.gold -= it.price;
+                it.sold = true;
+                rogueToast(`✨ 购得天赋：${TALENT_DEFS[it.id].name}`);
+                renderRogue();
+                return;
+            }
             ROGUE.gold -= it.price;
             it.sold = true;
             rogueAddToBag(it.id);
