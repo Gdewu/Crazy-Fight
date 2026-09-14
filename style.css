@@ -52,19 +52,46 @@ body { background:#0a0a18; min-height:100vh; display:flex; justify-content:cente
 #startScreen .equip-library::-webkit-scrollbar-thumb { background:#2a3a5e; border-radius:10px; }
 
 /* 全局规则 / 模拟统计 模态框 */
-#rulesModal, #heroModal, #challengeModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; align-items: safe center; z-index: 100000; }
-#rulesModal .modal-content, #heroModal .modal-content, #challengeModal .modal-content { background: #1a1a3a; border: 2px solid #5dade2; border-radius: 20px; padding: 20px 30px; max-width: 560px; width: 92%; color: #b0c4de; box-shadow: 0 20px 60px rgba(0,0,0,0.9); }
-#heroModal .modal-content, #challengeModal .modal-content { max-width: 720px; max-height: 88vh; overflow-y: auto; }
+#rulesModal, #heroModal, #challengeModal, #talentModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; align-items: safe center; z-index: 100000; }
+#rulesModal .modal-content, #heroModal .modal-content, #challengeModal .modal-content, #talentModal .modal-content { background: #1a1a3a; border: 2px solid #5dade2; border-radius: 20px; padding: 20px 30px; max-width: 560px; width: 92%; color: #b0c4de; box-shadow: 0 20px 60px rgba(0,0,0,0.9); }
+#heroModal .modal-content, #challengeModal .modal-content, #talentModal .modal-content { max-width: 720px; max-height: 88vh; overflow-y: auto; }
 /* 全局规则: 内容必然超过一屏, 由弹窗整体滚动(单个滚动条);
    否则内容被垂直居中 + 无高度上限, 上半部分(标题/「游戏玩法」折叠头)与底部「关闭」会被裁到屏幕外 */
 #rulesModal .modal-content { max-height: 88vh; overflow-y: auto; }
-#rulesModal .modal-content h2, #heroModal .modal-content h2, #challengeModal .modal-content h2 { color: #f5c842; text-align: center; border-bottom: 1px solid #2a3a5e; padding-bottom: 10px; margin-bottom: 12px; }
+#rulesModal .modal-content h2, #heroModal .modal-content h2, #challengeModal .modal-content h2, #talentModal .modal-content h2 { color: #f5c842; text-align: center; border-bottom: 1px solid #2a3a5e; padding-bottom: 10px; margin-bottom: 12px; }
 #rulesModal .modal-content ul { list-style: none; padding: 0; }
 #rulesModal .modal-content ul li { padding: 6px 0; border-bottom: 1px solid #2a2a4a; font-size: 13px; line-height: 1.6; }
 #rulesModal .modal-content ul li:last-child { border-bottom: none; }
 #rulesModal .modal-content ul li strong { color: #f5c842; }
 #rulesModal .modal-close, #heroModal .modal-close, #challengeModal .modal-close { display: block; margin: 14px auto 0; background: #2c3e50; color: #fff; border: none; border-radius: 30px; padding: 8px 30px; font-size: 14px; cursor: pointer; transition: 0.2s; }
 #rulesModal .modal-close:hover, #heroModal .modal-close:hover, #challengeModal .modal-close:hover { background: #e74c3c; }
+
+/* ---------- v2.9 天赋系统 ---------- */
+.talent-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:4px 0 2px; }
+.talent-open-btn { background:#1a1a3a; border:1px solid #5d6d9e; color:#9fb0d0; border-radius:8px; padding:2px 8px; font-size:11px; cursor:pointer; }
+.talent-open-btn:hover { border-color:#f5c842; color:#f5c842; }
+.talent-tags { display:flex; flex-wrap:wrap; gap:4px; }
+.talent-tag { display:inline-block; background:#1a1a30; border:1px solid #2a2a4a; border-radius:10px; padding:0 6px; font-size:10px; line-height:16px; }
+.talent-tag.empty { opacity:0.75; cursor:pointer; }
+#talentModal .talent-modal-body { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+#talentModal .talent-card { background:#0e0e22; border:1px solid #2a2a4a; border-radius:12px; padding:10px 12px; cursor:pointer; transition:0.15s; }
+#talentModal .talent-card:hover { transform:translateY(-1px); }
+#talentModal .talent-card.selected { background:#1a2438; box-shadow:0 0 0 1px #f5c842 inset; }
+#talentModal .talent-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+#talentModal .talent-name { font-weight:bold; font-size:14px; }
+#talentModal .talent-tier { font-size:11px; }
+#talentModal .talent-desc { color:#8899bb; font-size:12px; line-height:1.45; }
+#talentModal .talent-empty { grid-column:1 / -1; text-align:center; color:#8899bb; padding:28px 10px; font-size:14px; }
+#talentModal .talent-modal-tip { color:#8899bb; font-size:12px; margin:12px 0 8px; text-align:center; }
+#talentModal .talent-modal-actions { text-align:center; }
+#talentModal .talent-close-btn { background:#2c3e50; color:#fff; border:none; border-radius:30px; padding:8px 30px; font-size:14px; cursor:pointer; }
+#talentModal .talent-close-btn:hover { background:#5dade2; color:#0e0e22; }
+
+/* 远征天赋卡片 */
+.rp-card.talent-card-rp { min-height: 110px; }
+.rt-talent-line { cursor:pointer; font-size:12px; color:#9fb0d0; padding:2px 0; }
+.rt-talent-line:hover { color:#f5c842; }
+.rt-talent-lines { margin-top:4px; }
 
 /* ---------- 人物介绍 / 挑战队伍(复用「装备大全」的条目样式) ---------- */
 #heroModal .equip-item, #challengeModal .equip-item { background:#0e0e22; border-radius:10px; padding:8px 14px; margin-bottom:8px; border:1px solid #2a2a4a; position:relative; }

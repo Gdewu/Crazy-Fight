@@ -845,18 +845,21 @@ const MECHANICS = {
         onHitDealt(unit) {
             if (unit.starfallTimer > 0) return;
             const cfg = CONFIG.starfall;
-            unit.magicCharge = Math.min(cfg.maxCharge, round1((unit.magicCharge || 0) + cfg.chargePerHit));
+            const maxCharge = (typeof unit.starfallMaxCharge === 'number') ? unit.starfallMaxCharge : cfg.maxCharge;
+            unit.magicCharge = Math.min(maxCharge, round1((unit.magicCharge || 0) + cfg.chargePerHit));
         },
         onTick(unit, world, dt) {
             if (unit.hp <= 0) return;
             const cfg = CONFIG.starfall;
+            const maxCharge = (typeof unit.starfallMaxCharge === 'number') ? unit.starfallMaxCharge : cfg.maxCharge;
+            const adRatio = (typeof unit.starfallAdRatio === 'number') ? unit.starfallAdRatio : cfg.adRatio;
             // ① 充能溢出 → 开启星落(立即轰击第 1 次, 之后每 0.5s 一次, 10s 内共 20 次)
-            if (unit.starfallTimer <= 0 && (unit.magicCharge || 0) >= cfg.maxCharge) {
+            if (unit.starfallTimer <= 0 && (unit.magicCharge || 0) >= maxCharge) {
                 unit.magicCharge = 0;
                 unit.starfallTimer = cfg.durationSec;
                 unit.starfallAccum = 0;
                 notifySkillCast(unit, world);
-                world.addLog(`🌠 ${unit.name} 魔法充能满溢，星落降临！${cfg.durationSec} 秒内每 ${cfg.interval}s 对随机敌方单位造成 ${cfg.adRatio}×攻击力 的魔法伤害（期间不再普攻）`, 'highlight');
+                world.addLog(`🌠 ${unit.name} 魔法充能满溢，星落降临！${cfg.durationSec} 秒内每 ${cfg.interval}s 对随机敌方单位造成 ${adRatio}×攻击力 的魔法伤害（期间不再普攻）`, 'highlight');
                 starfallPulse(unit, world, cfg);
                 if (world.winner) return;
             }
@@ -878,10 +881,11 @@ const MECHANICS = {
         },
         statusText(unit) {
             const cfg = CONFIG.starfall;
+            const maxCharge = (typeof unit.starfallMaxCharge === 'number') ? unit.starfallMaxCharge : cfg.maxCharge;
             if (unit.starfallTimer > 0) {
                 return `<span class="status-badge" style="border-color:#8e44ad;color:#c39bd3;">🌠 星落 ${unit.starfallTimer.toFixed(1)}s</span>`;
             }
-            return `<span class="status-badge" style="border-color:#5d6d9e;color:#9fb0d0;">✨ 充能 ${unit.magicCharge || 0}/${cfg.maxCharge}</span>`;
+            return `<span class="status-badge" style="border-color:#5d6d9e;color:#9fb0d0;">✨ 充能 ${unit.magicCharge || 0}/${maxCharge}</span>`;
         }
     },
 

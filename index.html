@@ -208,9 +208,22 @@
     <ul class="tt-stats" id="ttStats"></ul>
 </div>
 
+<!-- 天赋选择弹窗 -->
+<div id="talentModal">
+    <div class="modal-content talent-modal">
+        <h2 id="talentModalTitle">✨ 天赋</h2>
+        <div id="talentModalBody" class="talent-modal-body"></div>
+        <div class="talent-modal-tip">最多选择 3 个天赋；传说至多 1 个；不可重复。点击卡片选中/取消。</div>
+        <div class="talent-modal-actions">
+            <button id="talentCloseBtn" class="talent-close-btn">完成</button>
+        </div>
+    </div>
+</div>
+
 <script src="config.js"></script>
 <script src="heroes.js"></script>
 <script src="equips.js"></script>
+<script src="talents.js"></script>
 <script src="mechanics.js"></script>
 <script src="engine.js"></script>
 <!-- 远征挑战(肉鸽模式)UI: 须在 game.js 之前加载(game.js 末尾立即执行 init(),其中要调用 GameRogue) -->
