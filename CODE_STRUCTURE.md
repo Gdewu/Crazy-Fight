@@ -1,8 +1,8 @@
 # 狂暴对战 · 远征版 · 代码结构分析
 
-> **代码基线**：`index.html` 对外版本标注 v2.9（远征·关卡 × 难度 两层）；引擎/机制注释内部沿用 v4.x 数值版本号（如「v4.7 重做」「v2.5 新增」），两套版本号并行。
-> **分析范围**：`config.js`(80) · `heroes.js`(100) · `equips.js`(134) · `mechanics.js`(1034) · `engine.js`(1359) · `rogue.js`(1328) · `game.js`(1413) · `index.html`(218) 全量展开；辅助脚本 `_smoke.html`(296) · `_tmpcheck.js`(27) · `serve-temp.js`(15) 仅登记。
-> **未纳入**：`style.css`(616) 仅登记角色，不展开样式体系；`tmp-verify/`（拆分对拍临时产物）与 `.codebuddy/plans/`（3v3 重构计划）不在本次范围。
+> **代码基线**：`index.html` 对外版本标注 v2.9（远征·关卡 × 难度 两层 + 天赋系统）；引擎/机制注释内部沿用 v4.x 数值版本号（如「v4.7 重做」「v2.5 新增」），两套版本号并行。
+> **分析范围**：`config.js`(88) · `heroes.js`(100) · `equips.js`(134) · `talents.js`(124) · `mechanics.js`(1038) · `engine.js`(1426) · `rogue.js`(1643) · `game.js`(1550) · `index.html`(233) 全量展开；辅助脚本 `_smoke.html`(404) · `_tmpcheck.js`(27) · `serve-temp.js`(15) 仅登记。
+> **未纳入**：`style.css`(669) 仅登记角色，不展开样式体系；`tmp-verify/`（拆分对拍临时产物）与 `.codebuddy/plans/`（3v3 重构计划）不在本次范围。
 > **粒度**：架构概览级 —— 分层图、表格与要点为主，不逐函数罗列签名与副作用。
 > **生成日期**：2026-09-14
 
@@ -45,16 +45,17 @@
 
 | 文件 | 行数 | 角色 | 本次分析 |
 | --- | --- | --- | --- |
-| `index.html` | 218 | 静态 DOM 骨架 + 7 个 `<script>` 顺序加载 | 展开（第 7 节） |
-| `config.js` | 80 | ① 配置层：`CONFIG` 魔法数字集中抽取 | 展开（5.1） |
+| `index.html` | 233 | 静态 DOM 骨架 + 8 个 `<script>` 顺序加载 | 展开（第 7 节） |
+| `config.js` | 88 | ① 配置层：`CONFIG` 魔法数字集中抽取 | 展开（5.1） |
 | `heroes.js` | 100 | ② 数据层：`heroDef` / `HERO_DEFS` / `HERO_LIST` | 展开（5.2） |
 | `equips.js` | 134 | ② 数据层：`equipDef` / `EQUIP_DEFS` / 分档工具 | 展开（5.2） |
-| `mechanics.js` | 1034 | ③ 机制层：`MECHANICS` 注册表（36 个机制） | 展开（5.3） |
-| `engine.js` | 1359 | ④ 引擎层：世界构建 / 推进 / 伤害 / 目标选择（无 DOM） | 展开（5.4） |
-| `rogue.js` | 1328 | ⑤ 肉鸽层：远征挑战完整 UI + 流程（仅浏览器） | 展开（5.5） |
-| `game.js` | 1413 | ⑥ UI 层：编队 / 渲染 / 战斗控制（仅浏览器） | 展开（5.6） |
-| `style.css` | 616 | 全部样式（面板 / 阵型网格 / 血条 / 徽章 / 弹窗 / 远征） | 不展开 |
-| `_smoke.html` | 296 | 冒烟测试页：注入 `window.__err` 收集器后加载同一套脚本 | 仅登记 |
+| `talents.js` | 124 | ② 数据层：`talentDef` / `TALENT_DEFS` / `TALENT_TIERS` / 归一化工具 | 展开（5.2） |
+| `mechanics.js` | 1038 | ③ 机制层：`MECHANICS` 注册表（36 个机制） | 展开（5.3） |
+| `engine.js` | 1426 | ④ 引擎层：世界构建 / 推进 / 伤害 / 目标选择（无 DOM） | 展开（5.4） |
+| `rogue.js` | 1643 | ⑤ 肉鸽层：远征挑战完整 UI + 流程（仅浏览器） | 展开（5.5） |
+| `game.js` | 1550 | ⑥ UI 层：编队 / 渲染 / 战斗控制 / 天赋弹窗（仅浏览器） | 展开（5.6） |
+| `style.css` | 669 | 全部样式（面板 / 阵型网格 / 血条 / 徽章 / 弹窗 / 远征 / 天赋） | 不展开 |
+| `_smoke.html` | 404 | 冒烟测试页：注入 `window.__err` 收集器后加载同一套脚本 | 仅登记 |
 | `_tmpcheck.js` | 27 | 临时数值核对脚本（Node 下 require 引擎，验证装备/双抗/小精灵日志） | 仅登记 |
 | `serve-temp.js` | 15 | 临时静态服务器，监听 8123 端口，供本地预览 | 仅登记 |
 | `tmp-verify/` | 5080 + 55 | 拆分前单文件快照 `old-full.js` + 新旧对拍脚本 `verify.js` | 不展开 |
@@ -101,18 +102,18 @@ flowchart TB
 
 ## 4. 跨文件依赖与加载顺序
 
-`index.html` 第 209–216 行的加载顺序是**唯一**的依赖声明方式（无模块系统）：
+`index.html` 第 223–231 行的加载顺序是**唯一**的依赖声明方式（无模块系统）：
 
 ```mermaid
 flowchart LR
-    CFG["config.js"] --> HER["heroes.js"] --> EQP["equips.js"] --> MEC["mechanics.js"] --> ENG["engine.js"] --> ROG["rogue.js"] --> GAM["game.js"]
+    CFG["config.js"] --> HER["heroes.js"] --> EQP["equips.js"] --> TAL["talents.js"] --> MEC["mechanics.js"] --> ENG["engine.js"] --> ROG["rogue.js"] --> GAM["game.js"]
 ```
 
 | 依赖关系 | 方向 | 说明 |
 | --- | --- | --- |
 | `heroes.js` / `equips.js` → `config.js` | 静态引用 | 顶层 `heroDef(...)` 时读取 `CONFIG` 数值（如 `CONFIG.bearClaw.minBaseHp`） |
 | `mechanics.js` → `engine.js` | **逆向（运行时）** | 文件加载在引擎**之前**，但机制钩子内调用的 `applyDamageTo` / `pickTarget` / `tick` 等只在**运行时**求值，靠函数声明提升 + 全局词法作用域成立 |
-| `engine.js` → 4 个数据文件 | 仅 Node | `require` 后把导出属性挂到 `globalThis`（engine.js:13–18） |
+| `engine.js` → 5 个数据文件 | 仅 Node | `require` 后把导出属性挂到 `globalThis`（engine.js:13–18） |
 | `engine.js` → `mechanics.js` | 仅 Node | 反向把引擎符号挂到 `globalThis`（engine.js:1349–1358），补平模块作用域差异 |
 | `game.js` → `rogue.js` | 运行时注入 | `GameRogue.install({ $, CHALLENGE_TEAMS, buildStatusHtml })`（game.js:1367） |
 | `rogue.js` → `game.js` | 调用回调 | 精英战复用 `CHALLENGE_TEAMS[0]`，状态徽章复用 `buildStatusHtml` |
