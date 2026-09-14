@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>狂暴对战（v2.8）</title>
+<title>狂暴对战（v2.9）</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
         <h1>⚔️ 狂暴对战 ⚔️</h1>
     </div>
     <button class="start-btn" id="startBtn">⚡ 进入战斗</button>
-    <div class="version"><span class="v-num">v2.8 更新日志</span>🗺️远征难度 5 档(远征1~5，表尾可继续扩展) · 🎡密码锁式难度滚轮(滚轮逐档/拖拽/点击/键盘，滚到底为最高档) · 🏅击败 BOSS 完整通关解锁下一档(进度存本机，刷新不丢)</div>
+    <div class="version"><span class="v-num">v2.9 更新日志</span>🧭远征两层结构(先选关卡：测试远征1 / 火焰山 / 流沙河，再选难度：密码锁滚轮 1~5) · 🔓难度各关独立(本关通关难度N → 只解锁本关难度N+1，每关进度单独保存) · 📍顶栏显示「关卡 · 难度」(🏁火焰山 · 难度3)</div>
     <div class="btn-group">
         <button id="rogueOpenBtn" class="rogue-entry-btn">🗺️ 远征挑战</button>
         <button id="toggleEquipBtn">📦 装备大全</button>
@@ -127,8 +127,11 @@
 
 <!-- 远征挑战(肉鸽模式 2.4): 全屏; 只能操作 A 队;
     出征→战斗→战斗→商店→装备升级→精英战→BOSS 共 7 个节点按顺序推进;
-    v2.8: 入口为「密码锁式难度滚轮」(远征1~5, 可扩展), 通关(击败BOSS)解锁下一档并存本地;
+    v2.8: 入口为「密码锁式难度滚轮」(测试远征1~5 为预留名, 可扩展), 通关(击败BOSS)解锁下一档并存本地;
           顶栏 #rogueDiff 显示本局难度(入口「选难度」界面整条顶栏与节点地图隐藏, 地图自整备/战斗起显示);
+    v2.9: 两层结构 — 第一层「选关卡」(测试远征1 / 火焰山 / 流沙河 垂直列表, 关卡全部开放, 每关预留配置位),
+          第二层「选难度」(密码锁滚轮 1~5, 各关独立解锁; 左下角有「← 返回选择」);
+          进行中的那一关显示「进行中：节点K · 难度N」并可点击继续;
     战斗界面为上下布局(B 队在上 / A 队在下, 双方各 3列×2行 前后排 6 站位), 战斗日志在右侧,
     并可「⚙ 调整装备/站位」暂停回整备; 商店可卖装备(普通 6 金 / 稀有 12 金 / 升级装备 10 金) -->
 <div id="rogueModal">

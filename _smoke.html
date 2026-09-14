@@ -12,7 +12,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__err.push('
 
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>狂暴对战（v2.8）</title>
+<title>狂暴对战（v2.9）</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -23,7 +23,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__err.push('
         <h1>⚔️ 狂暴对战 ⚔️</h1>
     </div>
     <button class="start-btn" id="startBtn">⚡ 进入战斗</button>
-    <div class="version"><span class="v-num">v2.8 更新日志</span>🗺️远征难度 5 档(远征1~5，表尾可继续扩展) · 🎡密码锁式难度滚轮(滚轮逐档/拖拽/点击/键盘，滚到底为最高档) · 🏅击败 BOSS 完整通关解锁下一档(进度存本机，刷新不丢)</div>
+    <div class="version"><span class="v-num">v2.9 更新日志</span>🧭远征两层结构(先选关卡：测试远征1 / 火焰山 / 流沙河，再选难度：密码锁滚轮 1~5) · 🔓难度各关独立(本关通关难度N → 只解锁本关难度N+1，每关进度单独保存) · 📍顶栏显示「关卡 · 难度」(🏁火焰山 · 难度3)</div>
     <div class="btn-group">
         <button id="rogueOpenBtn" class="rogue-entry-btn">🗺️ 远征挑战</button>
         <button id="toggleEquipBtn">📦 装备大全</button>
@@ -243,11 +243,21 @@ window.addEventListener('unhandledrejection', function (e) { window.__err.push('
         say('  成员 ' + k, typeof R[k] === 'undefined' ? 'MISSING' : typeof R[k]));
     say('  节点数', (R.ROGUE_NODES || []).length);
 
-    // ---- 入口 ----
-    run('打开远征弹窗', () => { q('#rogueOpenBtn').click(); return 'phase=' + R.ROGUE.phase + ' 入口字数=' + q('#rogueBody').innerHTML.length; });
+    // ---- 入口: 第一层选关卡 / 第二层选难度 ----
+    run('打开远征弹窗', () => { q('#rogueOpenBtn').click(); return 'phase=' + R.ROGUE.phase + ' 选关层=' + R.ROGUE.layerSelect + ' 关卡数=' + all('#rogueBody .rsl-card').length; });
+    run('进入关卡②(火焰山)', () => {
+        const c = all('#rogueBody .rsl-card[data-level="2"]')[0];
+        if (!c) return '列表缺失(卡片数=' + all('#rogueBody .rsl-card').length + ')';
+        c.click();
+        return '关卡=' + R.ROGUE.level + ' 关卡名=' + (R.ROGUE_LEVELS || []).filter(l => l.id === R.ROGUE.level).map(l => l.name).join('') +
+            ' phase=' + R.ROGUE.phase + ' 选关层=' + R.ROGUE.layerSelect + ' 难度=' + R.ROGUE.difficulty;
+    });
+    run('返回选择层', () => { const b = all('#rogueActions button').filter(x => x.textContent.includes('返回选择'))[0]; if (!b) return '按钮缺失: ' + labels(); b.click(); return '选关层=' + R.ROGUE.layerSelect + ' 卡片数=' + all('#rogueBody .rsl-card').length; });
+    run('再进关卡①(测试远征1)', () => { const c = all('#rogueBody .rsl-card[data-level="1"]')[0]; c.click(); return '关卡=' + R.ROGUE.level + ' phase=' + R.ROGUE.phase + ' 选关层=' + R.ROGUE.layerSelect; });
     run('难度滚轮', () => '难度=' + R.ROGUE.difficulty + ' 滚轮项=' + all('#rogueLock .rp-lock-item').length +
-        ' 锁定项=' + all('#rogueLock .rp-lock-item.locked').length + ' 已通关=' + R.ROGUE.maxCleared);
-    run('进入远征(远征1)', () => press('开始远征') ? ('phase=' + R.ROGUE.phase + ' 难度=' + R.ROGUE.difficulty + ' 顶栏=' + q('#rogueDiff').textContent.trim()) : ('按钮缺失: ' + labels()));
+        ' 锁定项=' + all('#rogueLock .rp-lock-item.locked').length + ' 本关已通关难度=' + (R.ROGUE.levelCleared[R.ROGUE.level] || 0) +
+        ' 滚轮文字=' + all('#rogueLock .rp-lock-item .rpl-name').map(e => e.textContent.trim()).join('/'));
+    run('开始远征', () => press('开始远征') ? ('phase=' + R.ROGUE.phase + ' 关卡=' + R.ROGUE.level + ' 难度=' + R.ROGUE.difficulty + ' 顶栏=' + q('#rogueDiff').textContent.trim()) : ('按钮缺失: ' + labels()));
 
     // ---- 节点① 出征: 选 2 英雄 + 1 装备 ----
     run('选择英雄/装备', () => {
@@ -282,7 +292,13 @@ window.addEventListener('unhandledrejection', function (e) { window.__err.push('
     });
     run('普通对战·自动战斗一帧', () => { q('#btnAuto').click(); return '按钮文案=' + q('#btnAuto').textContent.trim(); });
     run('普通对战面板', () => 'A队面板字数=' + q('#teamPanelsA').innerHTML.length + ' 日志字数=' + q('#log').innerHTML.length);
-    run('关闭并重开远征', () => { q('#rogueCloseBtn').click(); q('#rogueOpenBtn').click(); return 'display=' + q('#rogueModal').style.display; });
+    run('关闭并重开远征', () => { q('#rogueCloseBtn').click(); q('#rogueOpenBtn').click(); return 'display=' + q('#rogueModal').style.display + ' 选关层=' + R.ROGUE.layerSelect; });
+    run('点「进行中」项继续战局', () => {
+        const c = all('#rogueBody .rsl-card.running')[0];
+        if (!c) return '没有进行中的关卡项(' + all('#rogueBody .rsl-card').length + ' 项)';
+        c.click();
+        return 'phase=' + R.ROGUE.phase + ' 选关层=' + R.ROGUE.layerSelect;
+    });
 
     say('脚本错误数', window.__err.length);
     window.__err.forEach(e => say('  ERR', e));

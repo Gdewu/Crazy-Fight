@@ -46,9 +46,11 @@ let buildStatusHtml = null;
 //    ⑦ BOSS    : 大魔法师 → 击败后通关
 //  规则: 玩家只能操作 A 队(B 队由系统生成, 不可编辑); 每关开始全队回满血;
 //        生命(机会)3点, 战斗失败扣 1 点并回到整备重试, 扣完则远征失败
-//  难度(v2.8, 入口为密码锁式滚轮): 先做 5 档(远征1~5, 表尾可继续追加);
-//        击败 BOSS 完整通关本档 → 解锁下一档并写入 localStorage(键: heroDuel_rogueProgress_v1);
-//        本轮难度只负责「解锁/存档 + 顶栏显示本局难度」; 入口「选难度」界面整条顶栏与节点地图隐藏,
+//  两层结构(v2.9): 第一层「选关卡」(ROGUE_LEVELS: 测试远征1/火焰山/流沙河, 全部开放, 表尾可扩展)
+//                → 第二层「选难度」(ROGUE_DIFFICULTIES: 1~5 密码锁滚轮);
+//        难度各关独立: 本关通关难度N → 只解锁本关的难度N+1, 其它关卡不受影响;
+//        每关进度单独写入 localStorage(键: heroDuel_rogueProgress_v1, 结构 { v:3, levels:{ 关卡id: 难度 } })
+//        本轮关卡/难度只负责「解锁/存档 + 顶栏显示(🏁关卡 · 难度N)」; 选关层与选难度层隐藏顶栏与节点地图,
 //        地图自整备/战斗起显示、远征结束界面不显示; 战斗数值差异(mods)后续接入
 //  金币: 每个战斗节点胜利 +10; 商店(买/卖装备) 与 装备升级点(升级装备) 均可增减
 //  整备: 战斗前可调整 3列×2行 站位(拖拽/点击换位) + 背包装备自由分配(每人 2 装备点)
@@ -77,18 +79,31 @@ const ROGUE_NODES = [
     { type: 'elite',   icon: '🔥', name: '精英战',   desc: '原队伍1（吸血）' },
     { type: 'boss',    icon: '👑', name: 'BOSS',     desc: '大魔法师' }
 ];
-// ---- v2.8 远征难度: 先做 5 档, 后续在表尾继续追加即可扩展档位 ----
-//  本轮为「难度选择 + 解锁/存档」框架: 各档位目前不影响战斗数值。
-//  后续接入数值差异时, 只需给每档补一个 mods 字段(如 { hp:1.15, atk:1.10 }), 加档位就往表里追加一项。
+// ---- v2.9 关卡表(第一层选关): 先做 3 关, 表尾继续追加即可扩展 ----
+//  · 关卡全部开放(不按顺序解锁), 难度才依次解锁(见下方难度表)
+//  · 每关预留配置位: 以后可单独给某关加 nodes(节点表) / enemies(敌人) / rewards(奖励) / mods(数值),
+//    目前各关都沿用默认的七节点流程与随机敌人(出征→战斗→战斗→商店→装备升级→精英战→BOSS)
+const ROGUE_LEVELS = [
+    { id: 1, name: '测试远征1' },
+    { id: 2, name: '火焰山' },
+    { id: 3, name: '流沙河' }
+];
+function rogueLevelDef(id) { return ROGUE_LEVELS.filter(l => l.id === id)[0] || null; }
+function rogueLevelName(id) { const l = rogueLevelDef(id); return l ? l.name : '关卡' + id; }
+
+// ---- v2.8/v2.9 难度档位(第二层左下角滚轮): 1~5, 各关卡独立解锁(本关通关难度N → 解锁本关难度N+1) ----
+//  · name 即滚轮里显示的文字(只显示数字); 以后接入数值差异时给对应行补一个 mods 字段即可
 const ROGUE_DIFFICULTIES = [
-    { level: 1, name: '远征1' },
-    { level: 2, name: '远征2' },
-    { level: 3, name: '远征3' },
-    { level: 4, name: '远征4' },
-    { level: 5, name: '远征5' }
+    { level: 1, name: '1' },
+    { level: 2, name: '2' },
+    { level: 3, name: '3' },
+    { level: 4, name: '4' },
+    { level: 5, name: '5' }
 ];
 const ROGUE_MAX_DIFFICULTY = ROGUE_DIFFICULTIES[ROGUE_DIFFICULTIES.length - 1].level;
-const ROGUE_SAVE_KEY = 'heroDuel_rogueProgress_v1';       // 本地存档: { v:1, maxCleared:N }
+// 本地存档: { v:3, levels:{ '1':3, '2':1 } } —— 只存「每关已通关的最高难度」, 没有全局难度
+// 旧档(v1/v2 带全局 maxCleared)一律作废: 只认 v===3, 否则所有关卡都从难度1 开始
+const ROGUE_SAVE_KEY = 'heroDuel_rogueProgress_v1';
 const ROGUE = {
     node: 0, lives: ROGUE_MAX_LIVES, phase: '', cleared: -1, gold: 0,
     team: [], bag: {}, enemies: [], shop: null,
@@ -96,24 +111,30 @@ const ROGUE = {
     items: {},            // v2.4 一次性物品库存(soul_potion/attack_potion → 数量)
     potionUse: {},        // v2.4 整备界面勾选「本场使用」的物品
     settle: null,         // v2.4 战斗结算数据({win, dmg})
-    difficulty: 1,        // v2.8 本局远征难度(档位号)
-    maxCleared: 0,        // v2.8 本地存档: 已通关的最高档位(0 = 尚未通关任何档位)
+    level: 1,             // v2.9 本局关卡(ROGUE_LEVELS.id)
+    difficulty: 1,        // v2.8 本局难度(1~5)
+    levelCleared: {},     // v2.9 本地存档: 每关已通关的最高难度({ 关卡id: 难度 }); 难度各关独立, 无全局难度
+    layerSelect: false,   // v2.9 是否正显示「关卡选择层」(第一层; 显示时 phase 保持战局阶段不动)
+    runPhase: null,       // v2.9 暂存的「进行中」战局阶段(null = 没有进行中的局)
+    runLevel: 0,          // v2.9 暂存战局所在的关卡
+    runDifficulty: 0,     // v2.9 暂存战局所在的难度
     result: null
 };
 let rogueWorld = null, rogueTimer = null, rogueLogRef = null, rogueLogShown = 0, rogueSpeed = 2;
 let rogueToastTimer = null, rogueMoveFrom = null;
 
-// ---- v2.8 难度 / 解锁 / 本地存档 ----
+// ---- v2.8 难度解锁 / 本地存档 ----
 function rogueDifficultyDef(level) {
     return ROGUE_DIFFICULTIES.filter(d => d.level === level)[0] || null;
 }
+// 滚轮里显示的文字(当前为数字 '1'~'5')
 function rogueDifficultyName(level) {
     const d = rogueDifficultyDef(level);
-    return d ? d.name : '远征' + level;
+    return d ? d.name : String(level);
 }
-// 下一档 = 已通关档位 + 1; 第一档(远征1)默认解锁
-function rogueDifficultyUnlocked(level) { return level <= ROGUE_DIFFICULTIES[0].level || ROGUE.maxCleared >= level - 1; }
-function rogueDifficultyCleared(level) { return ROGUE.maxCleared >= level; }
+// 各关独立解锁: 下一档 = 本关已通关难度 + 1; 每关的难度1 都默认解锁
+function rogueDifficultyUnlocked(level) { return level <= ROGUE_DIFFICULTIES[0].level || rogueLevelCleared(ROGUE.level) >= level - 1; }
+function rogueDifficultyCleared(level) { return rogueLevelCleared(ROGUE.level) >= level; }
 function rogueDifficultyStatus(level) {
     if (rogueDifficultyCleared(level)) return 'cleared';
     return rogueDifficultyUnlocked(level) ? 'open' : 'locked';
@@ -122,38 +143,77 @@ function rogueDifficultyStatusText(level) {
     const st = rogueDifficultyStatus(level);
     return st === 'cleared' ? '已通关' : (st === 'open' ? '可挑战' : '未解锁');
 }
+// 只认 v3(每关独立)存档; 旧档(v1/v2 带全局 maxCleared)作废 → 所有关卡从难度1 开始
 function rogueLoadProgress() {
-    let maxCleared = 0;
+    const out = { levels: {} };
     try {
         const raw = window.localStorage ? window.localStorage.getItem(ROGUE_SAVE_KEY) : null;
         const data = raw ? JSON.parse(raw) : null;
-        if (data && typeof data.maxCleared === 'number' && isFinite(data.maxCleared)) maxCleared = Math.floor(data.maxCleared);
-    } catch (err) { maxCleared = 0; }        // 隐私模式 / 存档损坏 → 从 0 开始
-    return Math.max(0, Math.min(ROGUE_MAX_DIFFICULTY, maxCleared));
+        if (data && data.v === 3 && data.levels && typeof data.levels === 'object') {
+            ROGUE_LEVELS.forEach(l => {                  // 只接受关卡表里存在的记录
+                const v = data.levels[l.id];
+                if (typeof v === 'number' && isFinite(v) && v > 0) out.levels[l.id] = Math.min(ROGUE_MAX_DIFFICULTY, Math.floor(v));
+            });
+        }
+    } catch (err) { out.levels = {}; }                   // 隐私模式 / 存档损坏 → 从零开始
+    return out;
 }
 function rogueSaveProgress() {
     try {
-        if (window.localStorage) window.localStorage.setItem(ROGUE_SAVE_KEY, JSON.stringify({ v: 1, maxCleared: ROGUE.maxCleared }));
+        if (window.localStorage) window.localStorage.setItem(ROGUE_SAVE_KEY, JSON.stringify({ v: 3, levels: ROGUE.levelCleared }));
     } catch (err) { /* 无法写入时不影响本局游玩 */ }
 }
-// 打开远征弹窗时调用: 读存档, 并把滚轮默认停在「下一档挑战」
+// 打开远征弹窗时调用: 读存档, 并把滚轮默认停在本关的「下一档难度」
 function rogueInitProgress() {
-    ROGUE.maxCleared = rogueLoadProgress();
-    ROGUE.difficulty = Math.min(ROGUE_MAX_DIFFICULTY, ROGUE.maxCleared + 1);
+    ROGUE.levelCleared = rogueLoadProgress().levels;
+    ROGUE.difficulty = Math.min(ROGUE_MAX_DIFFICULTY, rogueLevelCleared(ROGUE.level) + 1);
 }
-// 通关(击败 BOSS) → 记录进度并解锁下一档
+// 某关卡已通关的最高难度(0 = 该关还没通关过)
+function rogueLevelCleared(levelId) { return ROGUE.levelCleared[levelId] || 0; }
+// 通关(击败 BOSS) → 只记录本关进度并解锁本关下一档难度(其它关卡不受影响)
 function rogueMarkCleared() {
-    const lv = ROGUE.difficulty;
-    if (lv <= ROGUE.maxCleared) return;
-    ROGUE.maxCleared = Math.min(ROGUE_MAX_DIFFICULTY, lv);
+    const lv = ROGUE.difficulty, levelId = ROGUE.level;
+    if (lv <= rogueLevelCleared(levelId)) return;
+    ROGUE.levelCleared[levelId] = lv;
     rogueSaveProgress();
     const next = lv + 1;
-    if (next <= ROGUE_MAX_DIFFICULTY) rogueToast(`🏅 通关 ${rogueDifficultyName(lv)} → 已解锁 ${rogueDifficultyName(next)}`, true);
+    if (next <= ROGUE_MAX_DIFFICULTY) rogueToast(`🏅 通关 ${rogueLevelName(levelId)} 难度${lv} → 已解锁 ${rogueLevelName(levelId)} 难度${next}`, true);
+    else rogueToast(`🏅 通关 ${rogueLevelName(levelId)} 难度${lv}（${rogueLevelName(levelId)} 已是最高难度）`, true);
 }
 // 通关统一入口(结算界面 & 节点推进两处都会走到)
 function rogueFinishWin() {
     ROGUE.result = 'win'; ROGUE.phase = 'end';
     rogueMarkCleared();
+    rogueClearRun();
+}
+
+// ---- v2.9 关卡选择层 / 进行中战局的暂存与继续 ----
+//  第一层(选关列表)与第二层(难度滚轮)都属于「界面上层」, 战局阶段仍存在 phase 里:
+//    · 有进行中的局时切到选关层/别的关卡 → 先把阶段记进 runPhase/runLevel/runDifficulty, 点该关可原样继续
+//    · 开始新局 / 一局结束 → 清掉暂存(见 rogueReset / rogueFinishWin / rogueSettleConfirm 失败分支)
+const ROGUE_RUN_PHASES = ['heroSelect', 'prep', 'battle', 'settle', 'rewardEquip', 'rewardRare', 'recruit', 'shop', 'upgrade', 'defeat'];
+function rogueRunLive() { return ROGUE_RUN_PHASES.indexOf(ROGUE.phase) >= 0; }      // 当前界面就是战局
+function rogueRunExists() { return rogueRunLive() || !!ROGUE.runPhase; }            // 有可继续的一局
+function rogueRunLevelId() { return rogueRunLive() ? ROGUE.level : ROGUE.runLevel; }
+function rogueRunLevelDifficulty() { return rogueRunLive() ? ROGUE.difficulty : ROGUE.runDifficulty; }
+function rogueRunNodeText() {
+    const n = ROGUE_NODES[ROGUE.node];
+    return n ? `节点${ROGUE.node + 1} ${n.icon}${n.name}` : `节点${ROGUE.node + 1}`;
+}
+function rogueStashRun() {                       // 离开战局前, 把这一局记下来
+    if (!rogueRunLive()) return;
+    ROGUE.runPhase = ROGUE.phase;
+    ROGUE.runLevel = ROGUE.level;
+    ROGUE.runDifficulty = ROGUE.difficulty;
+}
+function rogueClearRun() { ROGUE.runPhase = null; ROGUE.runLevel = 0; ROGUE.runDifficulty = 0; }
+function rogueResumeRun() {                      // 回到暂存的那一局(成功返回 true)
+    if (!ROGUE.runPhase) return false;
+    ROGUE.phase = ROGUE.runPhase;
+    ROGUE.level = ROGUE.runLevel || ROGUE.level;
+    ROGUE.difficulty = ROGUE.runDifficulty || ROGUE.difficulty;
+    rogueClearRun();
+    return true;
 }
 
 // ---- 随机工具 ----
@@ -216,6 +276,8 @@ function rogueSellEquip(id) {
 // ---- 流程 ----
 function rogueReset() {
     rogueStopTimer();
+    rogueClearRun();                                 // v2.9: 开新局 / 重开 → 清掉「进行中」暂存
+    ROGUE.layerSelect = false;
     ROGUE.node = 0; ROGUE.lives = ROGUE_MAX_LIVES; ROGUE.phase = ''; ROGUE.cleared = -1; ROGUE.gold = 0;
     ROGUE.team = []; ROGUE.bag = {}; ROGUE.enemies = []; ROGUE.shop = null;
     ROGUE.poolHeroes = []; ROGUE.poolEquips = []; ROGUE.pickHeroes = []; ROGUE.pickEquips = [];
@@ -382,7 +444,7 @@ function rogueSettleConfirm() {
         }
     } else {
         ROGUE.lives -= 1;
-        if (ROGUE.lives <= 0) { ROGUE.result = 'lose'; ROGUE.phase = 'end'; }
+        if (ROGUE.lives <= 0) { ROGUE.result = 'lose'; ROGUE.phase = 'end'; rogueClearRun(); }
         else ROGUE.phase = 'defeat';
     }
     renderRogue();
@@ -414,14 +476,14 @@ function renderRogueMap() {
     }).join('<span class="rogue-link">▶</span>');
 }
 // ---- 顶栏 / 节点地图的按阶段显隐 ----
-//  顶栏(难度·生命·金币): 「选难度」入口界面整条隐藏, 出征选人起出现
-//  节点地图(①出征→⑦BOSS): 出征选人时尚未开始推进, 故也不显示; 进整备/战斗后才出现; 远征结束(通关/失败)界面不显示
+//  顶栏(难度·生命·金币): 「选关层」与「选难度」界面整条隐藏, 出征选人起出现
+//  节点地图(①出征→⑦BOSS): 选关层/选难度/出征选人 均不显示; 进整备/战斗后才出现; 远征结束界面也不显示
 const ROGUE_TOP_HIDDEN_PHASES = ['entry'];
 const ROGUE_MAP_HIDDEN_PHASES = ['entry', 'heroSelect', 'end'];
 function rogueToggleTopUi() {
     const topEl = $('rogueTop'), mapEl = $('rogueMap');
-    if (topEl) topEl.classList.toggle('hidden', ROGUE_TOP_HIDDEN_PHASES.indexOf(ROGUE.phase) >= 0);
-    if (mapEl) mapEl.classList.toggle('hidden', ROGUE_MAP_HIDDEN_PHASES.indexOf(ROGUE.phase) >= 0);
+    if (topEl) topEl.classList.toggle('hidden', ROGUE.layerSelect || ROGUE_TOP_HIDDEN_PHASES.indexOf(ROGUE.phase) >= 0);
+    if (mapEl) mapEl.classList.toggle('hidden', ROGUE.layerSelect || ROGUE_MAP_HIDDEN_PHASES.indexOf(ROGUE.phase) >= 0);
 }
 function renderRogue() {
     const livesEl = $('rogueLives'), goldEl = $('rogueGold');
@@ -429,14 +491,16 @@ function renderRogue() {
         livesEl.textContent = '生命 ' + '♥'.repeat(Math.max(0, ROGUE.lives)) + '♡'.repeat(Math.max(0, ROGUE_MAX_LIVES - ROGUE.lives));
     }
     if (goldEl) goldEl.textContent = `💰 金币 ${ROGUE.gold}`;
-    const diffEl = $('rogueDiff');                   // v2.8 顶栏常驻显示当前远征难度
-    if (diffEl) diffEl.textContent = `🏁 ${rogueDifficultyName(ROGUE.difficulty)}`;
+    const diffEl = $('rogueDiff');                   // v2.9 顶栏显示当前关卡 + 难度
+    if (diffEl) diffEl.textContent = `🏁 ${rogueLevelName(ROGUE.level)} · 难度${ROGUE.difficulty}`;
     renderRogueMap();
     rogueToggleTopUi();
     const body = $('rogueBody'), actions = $('rogueActions'), phaseEl = $('roguePhase');
     if (!body || !actions || !phaseEl) return;
     actions.innerHTML = '';
-    body.classList.toggle('entry-mode', ROGUE.phase === 'entry');   // 入口界面: 内容靠左下角排(仅该阶段生效)
+    // 第一层(选关层)覆盖在阶段之上: 只渲染选关列表, 不动 phase 对应的战局
+    body.classList.toggle('entry-mode', !ROGUE.layerSelect && ROGUE.phase === 'entry');   // 第二层: 内容靠左下角排
+    if (ROGUE.layerSelect) { renderRogueSelect(phaseEl, body, actions); return; }
     switch (ROGUE.phase) {
         case 'entry': renderRogueEntry(phaseEl, body, actions); break;
         case 'heroSelect': renderRogueHeroSelect(phaseEl, body, actions); break;
@@ -452,8 +516,48 @@ function renderRogue() {
         case 'end': renderRogueEnd(phaseEl, body, actions); break;
     }
 }
-// v2.8: 远征入口 · 密码锁式「难度滚轮」(上/下滚动逐档切换, 滚到底为最高档)
-//      难度只负责「解锁/存档」: 击败 BOSS 完整通关本档 → 解锁下一档(存 localStorage)
+// ---- v2.9 第一层: 关卡选择层(垂直列表; 点关卡进第二层, 或继续该关「进行中」的那一局) ----
+function rogueSelectRowHtml(def) {
+    const running = rogueRunExists() && def.id === rogueRunLevelId();
+    const cleared = rogueLevelCleared(def.id);
+    const badge = running ? `进行中 · ${rogueRunNodeText()} · 难度${rogueRunLevelDifficulty()}`
+        : cleared > 0 ? `已通关 难度${cleared}` : '未挑战';
+    const cls = running ? 'running' : (cleared > 0 ? 'cleared' : 'open');
+    const sub = running ? '点击继续这一局'
+        : cleared > 0 ? `最高通关：难度${cleared}（可重复挑战 · 难度 1~${ROGUE_MAX_DIFFICULTY}）`
+            : `可挑战：从节点① 出征开始 · 难度 1~${ROGUE_MAX_DIFFICULTY}`;
+    return `<div class="rsl-card ${cls}" data-level="${def.id}">
+        <div class="rsl-line"><span class="rsl-name">${def.name}</span>
+            <span class="rsl-badge ${cls}">${badge}</span></div>
+        <div class="rsl-sub">${sub}</div></div>`;
+}
+function renderRogueSelect(phaseEl, body, actions) {
+    phaseEl.textContent = `🧭 选择关卡（共 ${ROGUE_LEVELS.length} 关 · 难度各关独立：本关通关难度N → 解锁本关难度N+1）`;
+    body.innerHTML = `<div class="rogue-select">${ROGUE_LEVELS.map(rogueSelectRowHtml).join('')}</div>`;
+    body.querySelectorAll('.rsl-card').forEach(card => {
+        card.addEventListener('click', () => rogueSelectLevel(parseInt(card.dataset.level, 10)));
+    });
+}
+// 点选某关卡: 该关「进行中」的那一局 → 原样回去继续; 否则 → 进入第二层(难度滚轮 + 开始远征)
+function rogueSelectLevel(levelId) {
+    ROGUE.layerSelect = false;
+    if (rogueRunExists() && levelId === rogueRunLevelId()) {
+        if (!rogueRunLive()) {                           // 暂存的那一局 → 恢复阶段继续
+            rogueResumeRun();
+            rogueToast(`继续 ${rogueLevelName(levelId)} · 难度${ROGUE.difficulty}：${rogueRunNodeText()}`, true);
+        }
+        renderRogue();
+        return;
+    }
+    rogueStashRun();                                     // 切去别的关卡 → 先把进行中的那一局记下来
+    ROGUE.level = levelId;
+    ROGUE.difficulty = Math.min(ROGUE_MAX_DIFFICULTY, rogueLevelCleared(levelId) + 1);   // 默认停在本关的「下一档难度」
+    ROGUE.phase = 'entry';
+    renderRogue();
+}
+// v2.8/v2.9 第二层: 密码锁式「难度滚轮」(上/下滚动逐档切换, 滚到底为最高档)
+//      滚轮只显示难度数字 1~5(关卡名不在本层重复); 难度只负责「解锁/存档」:
+//      击败 BOSS 完整通关难度N → 全局解锁难度N+1(存 localStorage)
 //      开局不赠送任何金币 / 药剂 / 装备：金币靠战斗胜利获得，药剂需在商店节点购买
 function rogueLockItemHtml(level) {
     const st = rogueDifficultyStatus(level);
@@ -462,7 +566,7 @@ function rogueLockItemHtml(level) {
         <span class="rpl-status">${rogueDifficultyStatusText(level)}</span></div>`;
 }
 function renderRogueEntry(phaseEl, body, actions) {
-    phaseEl.textContent = `🧭 选择远征难度（共 ${ROGUE_DIFFICULTIES.length} 档）`;
+    phaseEl.textContent = `🧭 选择难度（共 ${ROGUE_DIFFICULTIES.length} 档 · 本关通关难度N → 解锁本关难度N+1）`;
     // 入口只有「难度滚轮 + 状态行」两块, 由 .rogue-body.entry-mode 排到界面左下角
     // (原先的说明文字与「关卡路线」列表已移除)
     let html = `<div class="rogue-lock">
@@ -474,26 +578,27 @@ function renderRogueEntry(phaseEl, body, actions) {
         <div class="rpl-band"></div>
     </div>
     <div class="rpl-meta">
-        <span>🏅 已通关：<b>${ROGUE.maxCleared > 0 ? rogueDifficultyName(ROGUE.maxCleared) : '无'}</b></span>
-        <span>当前选择：<b id="rogueLockSel">${rogueDifficultyName(ROGUE.difficulty)}</b><span id="rogueLockSt"> · ${rogueDifficultyStatusText(ROGUE.difficulty)}</span></span>
+        <span>🏅 本关已通关：<b>${rogueLevelCleared(ROGUE.level) > 0 ? '难度' + rogueLevelCleared(ROGUE.level) : '无'}</b></span>
+        <span>当前选择：难度<b id="rogueLockSel">${rogueDifficultyName(ROGUE.difficulty)}</b><span id="rogueLockSt"> · ${rogueDifficultyStatusText(ROGUE.difficulty)}</span></span>
     </div>`;
     body.innerHTML = html;
     const startBtn = rogueBtn('', () => rogueStartRun());
     actions.appendChild(startBtn);
+    actions.appendChild(rogueBtn('← 返回选择', () => { ROGUE.layerSelect = true; renderRogue(); }, 'rogue-back-btn'));
     rogueBindLockWheel(startBtn);
 }
 // 开始一局远征(先校验解锁状态)
 function rogueStartRun() {
     const lv = ROGUE.difficulty;
     if (!rogueDifficultyUnlocked(lv)) {
-        rogueToast(`${rogueDifficultyName(lv)} 未解锁：请先通关 ${rogueDifficultyName(lv - 1)}`);
+        rogueToast(`难度${lv} 未解锁：请先通关 难度${lv - 1}`);
         return;
     }
     rogueStopTimer();
     rogueReset();
     ROGUE.difficulty = lv;
     rogueEnterNode();
-    rogueToast(`本局难度：${rogueDifficultyName(lv)}（共 ${ROGUE_DIFFICULTIES.length} 档）`, true);
+    rogueToast(`本局：${rogueLevelName(ROGUE.level)} · 难度${lv}`, true);
     renderRogue();
 }
 // 密码锁滚轮: 中间格 = 当前选中难度; 支持滚轮逐档 / 拖拽滚动 / 点击跳档 / 键盘上下键
@@ -531,7 +636,7 @@ function rogueBindLockWheel(startBtn) {
         if (stEl) stEl.textContent = ' · ' + rogueDifficultyStatusText(cur);
         if (startBtn) {
             const unlocked = rogueDifficultyUnlocked(cur);
-            startBtn.textContent = unlocked ? `▶ 开始远征（${rogueDifficultyName(cur)}）` : `🔒 ${rogueDifficultyName(cur)} 未解锁`;
+            startBtn.textContent = unlocked ? `▶ 开始远征（难度${cur}）` : `🔒 难度${cur} 未解锁`;
             startBtn.disabled = !unlocked;
         }
         const el = elOf(cur);
@@ -609,7 +714,7 @@ function renderRogueSettle(phaseEl, body, actions) {
 }
 // ① 出征选人: 随机 5 选 2 英雄 + 随机 5 选 1 普通装备
 function renderRogueHeroSelect(phaseEl, body, actions) {
-    phaseEl.textContent = `节点① 出征 · 本局难度：${rogueDifficultyName(ROGUE.difficulty)} · 随机 5 选 2 名英雄 + 4 选 1 件基础装备`;
+    phaseEl.textContent = `节点① 出征 · ${rogueLevelName(ROGUE.level)} · 难度${ROGUE.difficulty} · 随机 5 选 2 名英雄 + 4 选 1 件基础装备`;
     let html = `<div class="rogue-note">已选英雄 ${ROGUE.pickHeroes.length}/2　已选装备 ${ROGUE.pickEquips.length}/1</div><div class="rogue-pick">`;
     html += ROGUE.poolHeroes.map(id => {
         const h = HERO_DEFS[id];
@@ -1265,17 +1370,21 @@ function renderRogueDefeat(phaseEl, body, actions) {
 function renderRogueEnd(phaseEl, body, actions) {
     const win = ROGUE.result === 'win';
     const lv = ROGUE.difficulty, next = lv + 1;
-    phaseEl.textContent = `${win ? '🎉 远征成功' : '💀 远征失败'} · ${rogueDifficultyName(lv)}`;
+    phaseEl.textContent = `${win ? '🎉 远征成功' : '💀 远征失败'} · ${rogueLevelName(ROGUE.level)} 难度${lv}`;
     const nd = ROGUE_NODES[ROGUE.node] || ROGUE_NODES[0];
-    // v2.8: 通关 → 展示本档通关与下一档解锁情况
+    // v2.9: 通关 → 展示本关/本难度通关与下一档难度解锁情况
     const diffLine = win
-        ? `已通关 <b>${rogueDifficultyName(lv)}</b>　🏅 最高通关：<b>${rogueDifficultyName(ROGUE.maxCleared)}</b>${next <= ROGUE_MAX_DIFFICULTY ? `　已解锁 <b>${rogueDifficultyName(next)}</b>` : '　（已是最高难度）'}`
-        : `本局难度：<b>${rogueDifficultyName(lv)}</b>　🏅 最高通关：${ROGUE.maxCleared > 0 ? rogueDifficultyName(ROGUE.maxCleared) : '无'}`;
+        ? `已通关 <b>${rogueLevelName(ROGUE.level)} 难度${lv}</b>　🏅 本关已通关：<b>难度${rogueLevelCleared(ROGUE.level)}</b>${next <= ROGUE_MAX_DIFFICULTY ? `　已解锁 <b>${rogueLevelName(ROGUE.level)} 难度${next}</b>` : `　（${rogueLevelName(ROGUE.level)} 已是最高难度）`}`
+        : `本局：<b>${rogueLevelName(ROGUE.level)} · 难度${lv}</b>　🏅 本关已通关：${rogueLevelCleared(ROGUE.level) > 0 ? '难度' + rogueLevelCleared(ROGUE.level) : '无'}`;
     body.innerHTML = `<div class="rogue-end">${win ? `🎉 恭喜通关全部 ${ROGUE_NODES.length} 个节点！` : '💀 生命耗尽，远征结束'}
         <span class="re-sub">${win ? '你带领小队击败了 BOSS 大魔法师 👑' : `止步于 ${nd.icon} ${nd.name}`}</span></div>
         <div class="rogue-note">${diffLine}</div>
         <div class="rogue-note">队伍：${rogueTeamNames()}　背包 ${rogueBagTotal()} 件装备　剩余金币 💰 ${ROGUE.gold}</div>`;
-    actions.appendChild(rogueBtn('重新开始远征', () => { rogueReset(); ROGUE.phase = 'entry'; renderRogue(); }));
+    actions.appendChild(rogueBtn('重新开始远征', () => {
+        rogueReset(); rogueInitProgress();               // v2.9: 结束 → 回到关卡选择层(此时已解锁下一档)
+        ROGUE.phase = 'entry'; ROGUE.layerSelect = true;
+        renderRogue();
+    }));
 }
 
 // ============================================================
@@ -1288,10 +1397,11 @@ function installRogueUI() {
     $('rogueOpenBtn').addEventListener('click', () => {
         rogueStopTimer();
         if (ROGUE.result) rogueReset();
-        if (!ROGUE.phase) {
-            ROGUE.phase = 'entry';                 // v2.8 首次进入 → 难度选择界面
-            rogueInitProgress();                   // 读取进度并把滚轮停在「下一档挑战」
+        if (!rogueRunExists()) {                   // 没有进行中的局 → 刷新解锁进度, 滚轮停在「下一档挑战」
+            if (!ROGUE.phase) ROGUE.phase = 'entry';
+            rogueInitProgress();
         }
+        ROGUE.layerSelect = true;                  // v2.9: 每次进入远征都先到「关卡选择层」
         rogueModal.style.display = 'flex';         // 先显示弹窗再渲染: 难度滚轮需要真实尺寸才能居中对齐
         renderRogue();
     });
@@ -1305,7 +1415,8 @@ function installRogueUI() {
     });
     // 控制台调试入口(与 window._duel 同约定): window._rogue.state / .world() / .finishNow()
     window._rogue = { state: ROGUE, world: () => rogueWorld, finishNow: rogueFinishNow, nodes: ROGUE_NODES, enterNode: rogueEnterNode, render: renderRogue, step: rogueStep,
-        difficulties: ROGUE_DIFFICULTIES, startRun: rogueStartRun, markCleared: rogueMarkCleared, saveKey: ROGUE_SAVE_KEY };
+        levels: ROGUE_LEVELS, difficulties: ROGUE_DIFFICULTIES, startRun: rogueStartRun, markCleared: rogueMarkCleared, saveKey: ROGUE_SAVE_KEY,
+        selectLevel: rogueSelectLevel, toSelectLayer: () => { ROGUE.layerSelect = true; renderRogue(); } };
 }
 
 // ============================================================
@@ -1328,6 +1439,7 @@ window.GameRogue = {
     rogueEnterNode: rogueEnterNode,
     ROGUE: ROGUE,
     ROGUE_NODES: ROGUE_NODES,
+    ROGUE_LEVELS: ROGUE_LEVELS,
     ROGUE_DIFFICULTIES: ROGUE_DIFFICULTIES,
     rogueStartRun: rogueStartRun,
     rogueMarkCleared: rogueMarkCleared
