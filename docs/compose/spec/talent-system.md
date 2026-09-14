@@ -3,7 +3,7 @@ feature: talent-system
 status: delivered
 updated: 2026-09-14
 branch: feature/talent-system
-commits: 6854402..HEAD
+commits: 6854402..55ee604
 ---
 
 # 天赋系统
